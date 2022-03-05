@@ -1,0 +1,9483 @@
+***********************************************************************************************;
+**  Program Name    :  adds-s002-all-p3-rand.sas                                             **;
+**  Date Created    :  21Mar2021                                                             **;
+**  Programmer Name :  LIUB65                                                                **;
+**  Purpose         :  Create adds-s002-all-p3-rand                                          **;
+**  Input data      :  adsl adds                                                             **;
+**  Output data     :  adds-s002-all-p3-rand.html                                            **;
+***********************************************************************************************;
+%let prot=/Volumes/app/cdars/prod/sites/cdars4/prjC459/nda2_unblinded_esub/bla_esub_adam/saseng/cdisc3_0;
+libname datvprot "&prot./data_vai" access=readonly;
+
+%let codename=adds-s002-all-p3-rand;
+%let outlog=&prot./analysis/esub/logs/&codename..log;
+%let outtable=&prot./analysis/esub/output/&codename..html;
+
+proc printto log="&outlog" new;
+run;
+
+options mprint mlogic symbolgen mprint symbolgen mlogic nocenter missing=" ";
+title;
+footnote;
+
+proc datasets library=WORK kill nolist nodetails;
+quit;
+
+/* Format */
+proc format;
+	value dsdecod 1="Adverse event" 3="Death" 5="Lost to follow-up" 7="Other" 
+		8="Physician decision" 9="Pregnancy" 11="Protocol deviation" 
+		13="Screen Failure" 14="Study terminated by sponsor" 
+		16="Withdrawal by subject" 
+		17="Medication error without associated adverse event" 
+		18="No longer meets eligibility criteria" 
+		25="Refused further study procedures" 26="Withdrawal by parent/guardian";
+run;
+
+/* Readin ADSL */
+data g_a_dsin;
+	set datvprot.ADDS;
+	analysis_subset='Y';
+run;
+
+data g_adsl_dsin;
+	set datvprot.adsl;
+	where RANDFL eq 'Y' and phasen ne 1 and agegr1n>1 and MULENRFL ne "Y";
+run;
+
+proc sql noprint;
+	create table a_dsin as select * from g_a_dsin where usubjid in (select 
+		distinct usubjid from g_adsl_dsin);
+quit;
+
+data __trtmap;
+	length trtcode trtdecd $100;
+
+	if 0 then
+		set g_adsl_dsin(keep=TRT01PN);
+	trtval=1;
+
+	if vtype(TRT01PN)='C' then
+		trtcode=tranwrd(compbl(quote("8")), ' ', '" "');
+	else
+		trtcode="8";
+	trtdecd="BNT162b2 (30 (*ESC*){unicode 03BC}g)";
+	trtvar="TRT01PN";
+	trtlbl="TRT01P";
+	output;
+	trtval=2;
+
+	if vtype(TRT01PN)='C' then
+		trtcode=tranwrd(compbl(quote("9")), ' ', '" "');
+	else
+		trtcode="9";
+	trtdecd="Placebo";
+	trtvar="TRT01PN";
+	trtlbl="TRT01P";
+	output;
+	trtval=3;
+
+	if vtype(TRT01PN)='C' then
+		trtcode=tranwrd(compbl(quote("8 9")), ' ', '" "');
+	else
+		trtcode="8 9";
+	trtdecd="Total";
+	trtvar="TRT01PN";
+	trtlbl="TRT01P";
+	output;
+	stop;
+run;
+
+data g_adsl_dsin;
+	set g_adsl_dsin;
+
+	if TRT01PN in (8) then
+		do;
+			newtrtn=1;
+			newtrt=coalescec("BNT162b2 (30 (*ESC*){unicode 03BC}g)", TRT01P);
+			output;
+		end;
+
+	if TRT01PN in (9) then
+		do;
+			newtrtn=2;
+			newtrt=coalescec("Placebo", TRT01P);
+			output;
+		end;
+
+	if TRT01PN in (8 9) then
+		do;
+			newtrtn=3;
+			newtrt=coalescec("Total", TRT01P);
+			output;
+		end;
+run;
+
+data g_a_dsin;
+	set g_a_dsin;
+
+	if TRT01PN in (8) then
+		do;
+			newtrtn=1;
+			newtrt=coalescec("BNT162b2 (30 (*ESC*){unicode 03BC}g)", TRT01P);
+			output;
+		end;
+
+	if TRT01PN in (9) then
+		do;
+			newtrtn=2;
+			newtrt=coalescec("Placebo", TRT01P);
+			output;
+		end;
+
+	if TRT01PN in (8 9) then
+		do;
+			newtrtn=3;
+			newtrt=coalescec("Total", TRT01P);
+			output;
+		end;
+run;
+
+proc sort data=g_adsl_dsin out=_ds1;
+	by usubjid newtrtn;
+run;
+
+proc sort data=g_a_dsin out=_ds2;
+	by usubjid newtrtn;
+run;
+
+data final;
+	merge _ds1(in=d1) _ds2(in=d2);
+	by usubjid newtrtn;
+
+	if d1;
+run;
+
+data _basetemplate(compress=no);
+	length _varname $8 _cvalue $35 _direct $20 _vrlabel $200 _rwlabel 
+		_colabel $800 _datatyp $5 _module $8 _pr_lbl $ 200;
+	array _c _character_;
+	delete;
+run;
+
+data _data1;
+	set final;
+	where (NEWTRTN is not missing);
+run;
+
+proc sort data=_data1;
+	by NEWTRTN USUBJID;
+run;
+
+data _data1;
+	retain _trt 0;
+	length _str $200;
+	_datasrt=1;
+	set _data1 end=eof;
+	by NEWTRTN USUBJID;
+	drop _str;
+	_str=' ';
+	_lastby=1;
+	_dummyby=0;
+
+	if first.NEWTRTN then
+		do;
+
+			if not missing(NEWTRTN) then
+				do;
+					_trt=_trt + 1;
+				end;
+			_str=NEWTRT;
+
+			if _trt > 0 then
+				call symput('_trtlb'||compress(put(_trt, 4.)), trim(left(_str)));
+		end;
+run;
+
+proc sql noprint;
+	select compress(put(count(*), 5.) ) into :_trt1 - :_trt3 from (select distinct 
+		USUBJID, _trt from _data1 where NEWTRTN is not missing) group by _trt;
+	select compress(put(count(*), 5.) ) into :_trt4 from (select distinct USUBJID 
+		from _data1 where NEWTRTN is not missing);
+quit;
+
+proc sort data=_data1 out=_bydat1(keep=_datasrt _dummyby) nodupkey;
+	by _datasrt;
+run;
+
+data _bydat1;
+	set _bydat1 end=eof;
+	by _datasrt;
+	retain _preby 0;
+	drop _preby;
+	_byvar1=0;
+
+	if eof then
+		do;
+			call symput("_preby1", compress(put(_byvar1, 4.)));
+
+			if 0=0 then
+				output;
+		end;
+run;
+
+data _bydat1;
+	set _bydat1;
+	by _datasrt;
+	length _bycol _byindnt $50 _bylast $10;
+	_bycol=" ";
+	_byindnt=" ";
+	_bylast=" ";
+run;
+
+proc sort data=_bydat1;
+	by _datasrt;
+run;
+
+proc sort data=_data1 out=_data1;
+	by _datasrt;
+run;
+
+/* Create criteria flags */
+data _data1;
+	set _data1;
+	_event1=ifN(RANDFL in ('Y'), 1, 0);
+	_event2=ifN(RANDFL eq 'Y' and (VAX101DT eq . and VAX102DT eq . and 
+		VAX10UDT=. and VAX201DT eq . and VAX202DT eq .), 1, 0);
+	_event3=ifN(RANDFL eq 'Y' and (VAX101DT ne . or VAX102DT ne .), 1, 0);
+	_event4=ifN(RANDFL eq 'Y' and VAX101DT ne . , 1, 0);
+	_event5=ifN(RANDFL eq 'Y' and VAX102DT ne . and (VAX102DT<UNBLNDDT or 
+		UNBLNDDT=.), 1, 0);
+	_event6=ifN(RANDFL eq 'Y' and DSPHASEN=26 and EOTDCDT ne . and dsdecodn not 
+		in (. 2) and (VAX101DT ne . or VAX102DT ne .) and (unblnddt=. or 
+		eotdcdt<unblnddt), 1, 0);
+	_event8=ifN(RANDFL eq 'Y' and UNBLNDDT ne . and (UNBLNDDT<=M1PD2DT or 
+		M1PD2DT=.), 1, 0);
+	_event9=ifN(RANDFL eq 'Y' and ((DSPHASEN=26 and dsdecodn=2) ) 
+		and (unblnddt=. or astdt<unblnddt), 1, 0);
+	_event10=ifN(RANDFL eq 'Y' and DSPHASEN=31 and EOSDCDT ne . and dsdecodn not 
+		in (. 2) and (VAX101DT ne . or VAX102DT ne .) and (unblnddt=. or 
+		eosdcdt<unblnddt) and EOSDCDT ne EOTXDCDT, 1, 0);
+	_event11=ifN(RANDFL eq 'Y' and DSPHASEN=31 and EOSDCDT ne . and dsdecodn not 
+		in (. 2) and vax101dt ne . and ((vax101dt<=astdt and vax102dt eq .) or 
+		vax101dt<=astdt < vax102dt) and (unblnddt=. or eosdcdt<unblnddt) and EOSDCDT 
+		ne EOTXDCDT, 1, 0);
+	_event12=ifN(RANDFL eq 'Y' and DSPHASEN=31 and EOSDCDT ne . and dsdecodn not 
+		in (. 2) and vax101dt ne . and vax102dt ne . and (vax102dt <=astdt 
+		and (M1PD2DT eq . or astdt<M1PD2DT)) and (unblnddt=. or eosdcdt<unblnddt) and 
+		EOSDCDT ne EOTXDCDT, 1, 0);
+	_event13=ifN(RANDFL eq 'Y' and DSPHASEN=31 and EOSDCDT ne . and dsdecodn not 
+		in (. 2) and vax101dt ne . and vax102dt ne . and M1PD2DT ne . and M1PD2DT le 
+		astdt and (unblnddt=. or eosdcdt<unblnddt) and EOSDCDT ne EOTXDCDT, 1, 0);
+	_event15=ifN(RANDFL eq 'Y' and (UNBLNDDT ne . or vax201dt ne .) and index(arm, 
+		'BNT'), 1, 0);
+	_event16=ifN(RANDFL eq 'Y' and ((VAX102DT>=UNBLNDDT) or (index(VAX10u, 'BNT') 
+		and VAX10UDT>=UNBLNDDT)) and UNBLNDDT ne . and index(arm, 'BNT'), 1, 0);
+	_event17=ifN(RANDFL eq 'Y' and ((DSPHASEN=26 and dsdecodn=2)) and (unblnddt 
+		ne . and astdt>=unblnddt) and index(arm, 'BNT'), 1, 0);
+	_event18=ifN(RANDFL eq 'Y' and vax101dt ne . and vax102dt ne . and M6PD2DT 
+		ne . and (UNBLNDDT ne . or vax201dt ne .) and index(arm, 'BNT'), 1, 0);
+	_event19=ifN(RANDFL eq 'Y' and DSPHASEN=31 and EOSDCDT ne . and dsdecodn not 
+		in (. 2) and (VAX101DT ne . or VAX102DT ne .) and (unblnddt ne . and 
+		eosdcdt>=unblnddt) and index(arm, 'BNT'), 1, 0);
+	_event20=ifN(RANDFL eq 'Y' and DSPHASEN=31 and EOSDCDT ne . and dsdecodn not 
+		in (. 2) and (VAX101DT ne . or VAX102DT ne .) and (M6PD2DT=. or 
+		M6PD2DT> astdt) and (unblnddt ne . and eosdcdt>=unblnddt) and index(arm, 
+		'BNT'), 1, 0);
+	_event21=ifN(RANDFL eq 'Y' and DSPHASEN=31 and EOSDCDT ne . and dsdecodn not 
+		in (. 2) and vax101dt ne . and vax102dt ne . and M6PD2DT ne . and M6PD2DT le 
+		astdt and (unblnddt ne . and eosdcdt>=unblnddt) and index(arm, 'BNT'), 1, 0);
+	_event23=ifN(RANDFL eq 'Y' and (UNBLNDDT ne . or vax201dt ne .) and 
+		index(armcd, 'PLACEBO'), 1, 0);
+	_event24=ifN(RANDFL eq 'Y' and DSPHASEN=31 and EOSDCDT ne . and dsdecodn not 
+		in (. 2) and (VAX201DT=. and VAX202DT=.) and (unblnddt ne . and 
+		eosdcdt>=unblnddt) and index(armcd, 'PLACEBO'), 1, 0);
+	_event25=ifN(RANDFL eq 'Y' and index(VAX201, 'BNT') and index(armcd, 
+		'PLACEBO'), 1, 0);
+	_event26=ifN(RANDFL eq 'Y' and index(VAX202, 'BNT') and index(armcd, 
+		'PLACEBO'), 1, 0);
+	_event27=ifN(RANDFL eq 'Y' and DSPHASEN=7 and EOTXDCDT ne . and dsdecodn not 
+		in (. 2) and vax201dt ne . and index(armcd, 'PLACEBO'), 1, 0);
+	_event29=ifN(RANDFL eq 'Y' and ((DSPHASEN=7 and dsdecodn=2) ) and index(armcd, 
+		'PLACEBO'), 1, 0);
+	_event30=ifN(RANDFL eq 'Y' and DSPHASEN=31 and EOSDCDT ne . and dsdecodn not 
+		in (. 2) and (VAX201DT ne . or VAX202DT ne .) and ((unblnddt ne . and 
+		eosdcdt>=unblnddt) or eosdcdt=eotxdcdt) and index(armcd, 'PLACEBO'), 1, 0);
+	_event31=ifN(RANDFL eq 'Y' and DSPHASEN=31 and EOSDCDT ne . and dsdecodn not 
+		in (. 2) and vax201dt ne . and ((vax201dt<=astdt and vax202dt eq .) or 
+		vax201dt<=astdt < vax202dt) and ((unblnddt ne . and eosdcdt>=unblnddt) or 
+		eosdcdt=eotxdcdt) and index(armcd, 'PLACEBO'), 1, 0);
+	_event32=ifN(RANDFL eq 'Y' and DSPHASEN=31 and EOSDCDT ne . and dsdecodn not 
+		in (. 2) and vax201dt ne . and vax202dt ne . and (vax202dt <=astdt 
+		and (M1PX2DT eq . or astdt<M1PX2DT)) and ((unblnddt ne . and 
+		eosdcdt>=unblnddt) or eosdcdt=eotxdcdt) and index(armcd, 'PLACEBO'), 1, 0);
+	_event33=ifN(RANDFL eq 'Y' and DSPHASEN=31 and EOSDCDT ne . and dsdecodn not 
+		in (. 2) and vax201dt ne . and vax202dt ne . and M1PX2DT ne . and M1PX2DT le 
+		astdt and ((unblnddt ne . and eosdcdt>=unblnddt) or eosdcdt=eotxdcdt) and 
+		index(armcd, 'PLACEBO'), 1, 0);
+run;
+
+/* Crit 1 */
+data _anal1;
+	length _EVENT1 8;
+	set _data1;
+	where same and _EVENT1 is not missing;
+	_blcksrt=1;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal1;
+	by _datasrt _blcksrt _EVENT1 _trt _cat;
+run;
+
+data _temp1;
+	set _anal1;
+	output;
+run;
+
+proc sort data=_temp1 out=_temp91 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT1 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp91;
+	format _EVENT1;
+	tables _datasrt*_blcksrt*_cat * _EVENT1 * _trt / sparse norow nocol nopercent 
+		out=_pct1(drop=percent);
+run;
+
+proc sort data=_anal1 out=_denom1(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom1;
+	set _denom1;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf1;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom1 out=_denomin1(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame1;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=1;
+	length _EVENT1 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT1=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT1=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT1=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame1;
+	by _datasrt _blcksrt _cat _EVENT1 _trt;
+run;
+
+proc sort data=_pct1;
+	by _datasrt _blcksrt _cat _EVENT1 _trt;
+run;
+
+data _pct1;
+	merge _frame1(in=_inframe) _pct1;
+	by _datasrt _blcksrt _cat _EVENT1 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct1;
+	by _datasrt _blcksrt _EVENT1;
+run;
+
+data _miss1(keep=_datasrt _blcksrt _EVENT1 totcount);
+	set _pct1;
+	where _EVENT1=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT1;
+
+	if first._EVENT1 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT1;
+run;
+
+data _pct1(drop=totcount);
+	merge _pct1 _miss1;
+	by _datasrt _blcksrt _EVENT1;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf1;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin1;
+	by _datasrt _cat;
+run;
+
+data _denomin1;
+	merge _denomf1(in=_inframe) _denomin1;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=1;
+run;
+
+proc sort data=_pct1;
+	by _datasrt _cat;
+run;
+
+data _pct1;
+	if 0 then
+		set _basetemplate;
+	merge _denomin1(in=_a) _pct1;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT1 ";
+	_vrlabel=" ";
+	_rwlabel="Randomized ";
+
+	if _EVENT1=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT1=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct1;
+	by _datasrt _blcksrt _catord _EVENT1 _trt _cat;
+run;
+
+data _base1;
+	length _catlabl $200;
+	set _pct1 end=eof;
+	by _datasrt _blcksrt _catord _EVENT1 _trt _cat;
+	retain _rowsrt 0 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT1 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=0;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 2 */
+data _anal2;
+	length _EVENT2 8;
+	set _data1;
+	where same and _EVENT2 is not missing;
+	_blcksrt=1;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal2;
+	by _datasrt _blcksrt _EVENT2 _trt _cat;
+run;
+
+data _temp2;
+	set _anal2;
+	output;
+run;
+
+proc sort data=_temp2 out=_temp92 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT2 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp92;
+	format _EVENT2;
+	tables _datasrt*_blcksrt*_cat * _EVENT2 * _trt / sparse norow nocol nopercent 
+		out=_pct2(drop=percent);
+run;
+
+proc sort data=_anal2 out=_denom2(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom2;
+	set _denom2;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf2;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom2 out=_denomin2(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame2;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=1;
+	length _EVENT2 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT2=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT2=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT2=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame2;
+	by _datasrt _blcksrt _cat _EVENT2 _trt;
+run;
+
+proc sort data=_pct2;
+	by _datasrt _blcksrt _cat _EVENT2 _trt;
+run;
+
+data _pct2;
+	merge _frame2(in=_inframe) _pct2;
+	by _datasrt _blcksrt _cat _EVENT2 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct2;
+	by _datasrt _blcksrt _EVENT2;
+run;
+
+data _miss2(keep=_datasrt _blcksrt _EVENT2 totcount);
+	set _pct2;
+	where _EVENT2=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT2;
+
+	if first._EVENT2 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT2;
+run;
+
+data _pct2(drop=totcount);
+	merge _pct2 _miss2;
+	by _datasrt _blcksrt _EVENT2;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf2;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin2;
+	by _datasrt _cat;
+run;
+
+data _denomin2;
+	merge _denomf2(in=_inframe) _denomin2;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=1;
+run;
+
+proc sort data=_pct2;
+	by _datasrt _cat;
+run;
+
+data _pct2;
+	if 0 then
+		set _basetemplate;
+	merge _denomin2(in=_a) _pct2;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT2 ";
+	_vrlabel=" ";
+	_rwlabel="Not vaccinated ";
+
+	if _EVENT2=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT2=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct2;
+	by _datasrt _blcksrt _catord _EVENT2 _trt _cat;
+run;
+
+data _base2;
+	length _catlabl $200;
+	set _pct2 end=eof;
+	by _datasrt _blcksrt _catord _EVENT2 _trt _cat;
+	retain _rowsrt 1 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT2 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=0;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 3 */
+data _anal3;
+	length _EVENT3 8;
+	set _data1;
+	where same and _EVENT3 is not missing;
+	_blcksrt=1;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal3;
+	by _datasrt _blcksrt _EVENT3 _trt _cat;
+run;
+
+data _temp3;
+	set _anal3;
+	output;
+run;
+
+proc sort data=_temp3 out=_temp93 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT3 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp93;
+	format _EVENT3;
+	tables _datasrt*_blcksrt*_cat * _EVENT3 * _trt / sparse norow nocol nopercent 
+		out=_pct3(drop=percent);
+run;
+
+proc sort data=_anal3 out=_denom3(keep=_datasrt _cat) nodupkey;
+	by _datasrt _cat;
+run;
+
+data _denom3;
+	set _denom3;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf3;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom3 out=_denomin3(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame3;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=1;
+	length _EVENT3 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT3=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT3=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT3=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame3;
+	by _datasrt _blcksrt _cat _EVENT3 _trt;
+run;
+
+proc sort data=_pct3;
+	by _datasrt _blcksrt _cat _EVENT3 _trt;
+run;
+
+data _pct3;
+	merge _frame3(in=_inframe) _pct3;
+	by _datasrt _blcksrt _cat _EVENT3 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct3;
+	by _datasrt _blcksrt _EVENT3;
+run;
+
+data _miss3(keep=_datasrt _blcksrt _EVENT3 totcount);
+	set _pct3;
+	where _EVENT3=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT3;
+
+	if first._EVENT3 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT3;
+run;
+
+data _pct3(drop=totcount);
+	merge _pct3 _miss3;
+	by _datasrt _blcksrt _EVENT3;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf3;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin3;
+	by _datasrt _cat;
+run;
+
+data _denomin3;
+	merge _denomf3(in=_inframe) _denomin3;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=1;
+run;
+
+proc sort data=_pct3;
+	by _datasrt _cat;
+run;
+
+data _pct3;
+	if 0 then
+		set _basetemplate;
+	merge _denomin3(in=_a) _pct3;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT3 ";
+	_vrlabel="Original blinded placebo-controlled follow-up period ";
+	_rwlabel="Vaccinated ";
+
+	if _EVENT3=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT3=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct3;
+	by _datasrt _blcksrt _catord _EVENT3 _trt _cat;
+run;
+
+data _base3;
+	length _catlabl $200;
+	set _pct3 end=eof;
+	by _datasrt _blcksrt _catord _EVENT3 _trt _cat;
+	retain _rowsrt 2 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT3 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=2;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 4 */
+data _anal4;
+	length _EVENT4 8;
+	set _data1;
+	where same and _EVENT4 is not missing;
+	_blcksrt=1;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal4;
+	by _datasrt _blcksrt _EVENT4 _trt _cat;
+run;
+
+data _temp4;
+	set _anal4;
+	output;
+run;
+
+proc sort data=_temp4 out=_temp94 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT4 _trt usubjid;
+run;
+
+proc freq data=_temp94;
+	format _EVENT4;
+	tables _datasrt*_blcksrt*_cat * _EVENT4 * _trt / sparse norow nocol nopercent 
+		out=_pct4(drop=percent);
+run;
+
+proc sort data=_anal4 out=_denom4(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom4;
+	set _denom4;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf4;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom4 out=_denomin4(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame4;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=1;
+	length _EVENT4 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT4=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT4=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT4=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame4;
+	by _datasrt _blcksrt _cat _EVENT4 _trt;
+run;
+
+proc sort data=_pct4;
+	by _datasrt _blcksrt _cat _EVENT4 _trt;
+run;
+
+data _pct4;
+	merge _frame4(in=_inframe) _pct4;
+	by _datasrt _blcksrt _cat _EVENT4 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct4;
+	by _datasrt _blcksrt _EVENT4;
+run;
+
+data _miss4(keep=_datasrt _blcksrt _EVENT4 totcount);
+	set _pct4;
+	where _EVENT4=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT4;
+
+	if first._EVENT4 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT4;
+run;
+
+data _pct4(drop=totcount);
+	merge _pct4 _miss4;
+	by _datasrt _blcksrt _EVENT4;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf4;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin4;
+	by _datasrt _cat;
+run;
+
+data _denomin4;
+	merge _denomf4(in=_inframe) _denomin4;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=1;
+run;
+
+proc sort data=_pct4;
+	by _datasrt _cat;
+run;
+
+data _pct4;
+	if 0 then
+		set _basetemplate;
+	merge _denomin4(in=_a) _pct4;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT4 ";
+	_vrlabel=" ";
+	_rwlabel="Dose 1 ";
+
+	if _EVENT4=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT4=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct4;
+	by _datasrt _blcksrt _catord _EVENT4 _trt _cat;
+run;
+
+data _base4;
+	length _catlabl $200;
+	set _pct4 end=eof;
+	by _datasrt _blcksrt _catord _EVENT4 _trt _cat;
+	retain _rowsrt 3 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT4 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=4;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 5 */
+data _anal5;
+	length _EVENT5 8;
+	set _data1;
+	where same and _EVENT5 is not missing;
+	_blcksrt=1;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal5;
+	by _datasrt _blcksrt _EVENT5 _trt _cat;
+run;
+
+data _temp5;
+	set _anal5;
+	output;
+run;
+
+proc sort data=_temp5 out=_temp95 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT5 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp95;
+	format _EVENT5;
+	tables _datasrt*_blcksrt*_cat * _EVENT5 * _trt / sparse norow nocol nopercent 
+		out=_pct5(drop=percent);
+run;
+
+proc sort data=_anal5 out=_denom5(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom5;
+	set _denom5;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf5;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom5 out=_denomin5(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame5;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=1;
+	length _EVENT5 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT5=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT5=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT5=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame5;
+	by _datasrt _blcksrt _cat _EVENT5 _trt;
+run;
+
+proc sort data=_pct5;
+	by _datasrt _blcksrt _cat _EVENT5 _trt;
+run;
+
+data _pct5;
+	merge _frame5(in=_inframe) _pct5;
+	by _datasrt _blcksrt _cat _EVENT5 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct5;
+	by _datasrt _blcksrt _EVENT5;
+run;
+
+data _miss5(keep=_datasrt _blcksrt _EVENT5 totcount);
+	set _pct5;
+	where _EVENT5=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT5;
+
+	if first._EVENT5 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT5;
+run;
+
+data _pct5(drop=totcount);
+	merge _pct5 _miss5;
+	by _datasrt _blcksrt _EVENT5;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf5;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin5;
+	by _datasrt _cat;
+run;
+
+data _denomin5;
+	merge _denomf5(in=_inframe) _denomin5;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=1;
+run;
+
+proc sort data=_pct5;
+	by _datasrt _cat;
+run;
+
+data _pct5;
+	if 0 then
+		set _basetemplate;
+	merge _denomin5(in=_a) _pct5;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT5 ";
+	_vrlabel=" ";
+	_rwlabel="Dose 2  ";
+
+	if _EVENT5=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT5=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct5;
+	by _datasrt _blcksrt _catord _EVENT5 _trt _cat;
+run;
+
+data _base5;
+	length _catlabl $200;
+	set _pct5 end=eof;
+	by _datasrt _blcksrt _catord _EVENT5 _trt _cat;
+	retain _rowsrt 4 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT5 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=4;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+data _anal6;
+	length _EVENT6 8;
+	set _data1;
+	where same and _EVENT6 is not missing;
+	_blcksrt=2;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal6;
+	by _datasrt _blcksrt _EVENT6 _trt _cat;
+run;
+
+data _temp6;
+	set _anal6;
+	output;
+run;
+
+proc sort data=_temp6 out=_temp96 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT6 _trt usubjid;
+run;
+
+proc freq data=_temp96;
+	format _EVENT6;
+	tables _datasrt*_blcksrt*_cat * _EVENT6 * _trt / sparse norow nocol nopercent 
+		out=_pct6(drop=percent);
+run;
+
+proc sort data=_anal6 out=_denom6(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom6;
+	set _denom6;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf6;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom6 out=_denomin6(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame6;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=2;
+	length _EVENT6 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT6=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT6=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT6=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame6;
+	by _datasrt _blcksrt _cat _EVENT6 _trt;
+run;
+
+proc sort data=_pct6;
+	by _datasrt _blcksrt _cat _EVENT6 _trt;
+run;
+
+data _pct6;
+	merge _frame6(in=_inframe) _pct6;
+	by _datasrt _blcksrt _cat _EVENT6 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct6;
+	by _datasrt _blcksrt _EVENT6;
+run;
+
+data _miss6(keep=_datasrt _blcksrt _EVENT6 totcount);
+	set _pct6;
+	where _EVENT6=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT6;
+
+	if first._EVENT6 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT6;
+run;
+
+data _pct6(drop=totcount);
+	merge _pct6 _miss6;
+	by _datasrt _blcksrt _EVENT6;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf6;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin6;
+	by _datasrt _cat;
+run;
+
+data _denomin6;
+	merge _denomf6(in=_inframe) _denomin6;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=2;
+run;
+
+proc sort data=_pct6;
+	by _datasrt _cat;
+run;
+
+data _pct6;
+	if 0 then
+		set _basetemplate;
+	merge _denomin6(in=_a) _pct6;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT6 ";
+	_vrlabel=" ";
+	_rwlabel="Discontinued from original blinded placebo-controlled vaccination period~{super c}";
+
+	if _EVENT6=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT6=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct6;
+	by _datasrt _blcksrt _catord _EVENT6 _trt _cat;
+run;
+
+data _base6;
+	length _catlabl $200;
+	set _pct6 end=eof;
+	by _datasrt _blcksrt _catord _EVENT6 _trt _cat;
+	retain _rowsrt 0 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT6 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=2;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 7 */
+data _anal7;
+	length DSDECODN 8;
+	set _data1;
+	where same and DSDECODN is not missing;
+	_blcksrt=2;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal7;
+	by _datasrt _blcksrt DSDECODN _trt _cat;
+run;
+
+data _temp7;
+	set _anal7;
+	output;
+run;
+
+proc sort data=_temp7 out=_temp97 nodupkey;
+	by _datasrt _blcksrt _cat DSDECODN _trt usubjid;
+	where RANDFL eq 'Y' and DSPHASEN=26 and EOTDCDT ne . and dsdecodn not in (. 2) 
+		and (VAX101DT ne . or VAX102DT ne .) and (unblnddt=. or eotdcdt<unblnddt);
+run;
+
+proc freq data=_temp97;
+	format DSDECODN;
+	tables _datasrt*_blcksrt*_cat * DSDECODN * _trt / sparse norow nocol nopercent 
+		out=_pct7(drop=percent);
+run;
+
+proc sort data=_anal7 out=_denom7(keep=_datasrt _cat) nodupkey;
+	where RANDFL eq 'Y' and DSPHASEN=26 and EOTDCDT ne . and dsdecodn not in (. 2) 
+		and (VAX101DT ne . or VAX102DT ne .) and (unblnddt=. or eotdcdt<unblnddt);
+	by _datasrt _cat;
+run;
+
+data _denom7;
+	set _denom7;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf7;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom7 out=_denomin7(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+proc sort data=_pct7 out=_expv7 (keep=_datasrt _blcksrt DSDECODN) nodupkey;
+	by _datasrt _blcksrt DSDECODN;
+run;
+
+proc sort data=_expv7;
+	by _datasrt _blcksrt DSDECODN;
+run;
+
+data _frame7;
+	set _expv7;
+	by _datasrt _blcksrt DSDECODN;
+
+	if first._blcksrt then
+		_catord=0;
+	_catord + 1;
+	_trt=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_cat=1;
+	output;
+	_trt=3;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame7;
+	by _datasrt _blcksrt _cat DSDECODN _trt;
+run;
+
+proc sort data=_pct7;
+	by _datasrt _blcksrt _cat DSDECODN _trt;
+run;
+
+data _pct7;
+	merge _frame7(in=_inframe) _pct7;
+	by _datasrt _blcksrt _cat DSDECODN _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct7;
+	by _datasrt _blcksrt DSDECODN;
+run;
+
+data _miss7(keep=_datasrt _blcksrt DSDECODN totcount);
+	set _pct7;
+	where DSDECODN=9998;
+	retain totcount;
+	by _datasrt _blcksrt DSDECODN;
+
+	if first.DSDECODN then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last.DSDECODN;
+run;
+
+data _pct7(drop=totcount);
+	merge _pct7 _miss7;
+	by _datasrt _blcksrt DSDECODN;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf7;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin7;
+	by _datasrt _cat;
+run;
+
+data _denomin7;
+	merge _denomf7(in=_inframe) _denomin7;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=2;
+run;
+
+proc sort data=_pct7;
+	by _datasrt _cat;
+run;
+
+data _pct7;
+	if 0 then
+		set _basetemplate;
+	merge _denomin7(in=_a) _pct7;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="DSDECODN ";
+	_vrlabel="Reason for discontinuation ";
+	_rwlabel=put(DSDECODN, dsdecod.);
+
+	if DSDECODN=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if DSDECODN=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct7;
+	by _datasrt _blcksrt _catord DSDECODN _trt _cat;
+run;
+
+data _base7;
+	length _catlabl $200;
+	set _pct7 end=eof;
+	by _datasrt _blcksrt _catord DSDECODN _trt _cat;
+	retain _rowsrt 1 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			*----------------------------------------------------------------------;
+			* Put character A0x at right most character to pad text;
+			*----------------------------------------------------------------------;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first.DSDECODN then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=8;
+	_dptindt=4;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 8 */
+data _anal8;
+	length _EVENT8 8;
+	set _data1;
+	where same and _EVENT8 is not missing;
+	_blcksrt=3;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal8;
+	by _datasrt _blcksrt _EVENT8 _trt _cat;
+run;
+
+data _temp8;
+	set _anal8;
+	output;
+run;
+
+proc sort data=_temp8 out=_temp98 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT8 _trt usubjid;
+run;
+
+proc freq data=_temp98;
+	format _EVENT8;
+	tables _datasrt*_blcksrt*_cat * _EVENT8 * _trt / sparse norow nocol nopercent 
+		out=_pct8(drop=percent);
+run;
+
+proc sort data=_anal8 out=_denom8(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom8;
+	set _denom8;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf8;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom8 out=_denomin8(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame8;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=3;
+	length _EVENT8 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT8=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT8=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT8=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame8;
+	by _datasrt _blcksrt _cat _EVENT8 _trt;
+run;
+
+proc sort data=_pct8;
+	by _datasrt _blcksrt _cat _EVENT8 _trt;
+run;
+
+data _pct8;
+	merge _frame8(in=_inframe) _pct8;
+	by _datasrt _blcksrt _cat _EVENT8 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct8;
+	by _datasrt _blcksrt _EVENT8;
+run;
+
+data _miss8(keep=_datasrt _blcksrt _EVENT8 totcount);
+	set _pct8;
+	where _EVENT8=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT8;
+
+	if first._EVENT8 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT8;
+run;
+
+data _pct8(drop=totcount);
+	merge _pct8 _miss8;
+	by _datasrt _blcksrt _EVENT8;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf8;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin8;
+	by _datasrt _cat;
+run;
+
+data _denomin8;
+	merge _denomf8(in=_inframe) _denomin8;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=3;
+run;
+
+proc sort data=_pct8;
+	by _datasrt _cat;
+run;
+
+data _pct8;
+	if 0 then
+		set _basetemplate;
+	merge _denomin8(in=_a) _pct8;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT8 ";
+	_vrlabel=" ";
+	_rwlabel="Unblinded before 1-month post(*ESC*){unicode 2013}Dose 2 visit ";
+
+	if _EVENT8=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT8=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct8;
+	by _datasrt _blcksrt _catord _EVENT8 _trt _cat;
+run;
+
+data _base8;
+	length _catlabl $200;
+	set _pct8 end=eof;
+	by _datasrt _blcksrt _catord _EVENT8 _trt _cat;
+	retain _rowsrt 0 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT8 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=2;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 9 */
+data _anal9;
+	length _EVENT9 8;
+	set _data1;
+	where same and _EVENT9 is not missing;
+	_blcksrt=3;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal9;
+	by _datasrt _blcksrt _EVENT9 _trt _cat;
+run;
+
+data _temp9;
+	set _anal9;
+	output;
+run;
+
+proc sort data=_temp9 out=_temp99 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT9 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp99;
+	format _EVENT9;
+	tables _datasrt*_blcksrt*_cat * _EVENT9 * _trt / sparse norow nocol nopercent 
+		out=_pct9(drop=percent);
+run;
+
+proc sort data=_anal9 out=_denom9(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom9;
+	set _denom9;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf9;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom9 out=_denomin9(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame9;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=3;
+	length _EVENT9 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT9=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT9=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT9=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame9;
+	by _datasrt _blcksrt _cat _EVENT9 _trt;
+run;
+
+proc sort data=_pct9;
+	by _datasrt _blcksrt _cat _EVENT9 _trt;
+run;
+
+data _pct9;
+	merge _frame9(in=_inframe) _pct9;
+	by _datasrt _blcksrt _cat _EVENT9 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct9;
+	by _datasrt _blcksrt _EVENT9;
+run;
+
+data _miss9(keep=_datasrt _blcksrt _EVENT9 totcount);
+	set _pct9;
+	where _EVENT9=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT9;
+
+	if first._EVENT9 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT9;
+run;
+
+data _pct9(drop=totcount);
+	merge _pct9 _miss9;
+	by _datasrt _blcksrt _EVENT9;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf9;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin9;
+	by _datasrt _cat;
+run;
+
+data _denomin9;
+	merge _denomf9(in=_inframe) _denomin9;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=3;
+run;
+
+proc sort data=_pct9;
+	by _datasrt _cat;
+run;
+
+data _pct9;
+	if 0 then
+		set _basetemplate;
+	merge _denomin9(in=_a) _pct9;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT9 ";
+	_vrlabel=" ";
+	_rwlabel="Completed 1-month post(*ESC*){unicode 2013}Dose 2 visit ";
+
+	if _EVENT9=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT9=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct9;
+	by _datasrt _blcksrt _catord _EVENT9 _trt _cat;
+run;
+
+data _base9;
+	length _catlabl $200;
+	set _pct9 end=eof;
+	by _datasrt _blcksrt _catord _EVENT9 _trt _cat;
+	retain _rowsrt 1 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT9 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=2;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 10 */
+data _anal10;
+	length _EVENT10 8;
+	set _data1;
+	where same and _EVENT10 is not missing;
+	_blcksrt=4;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal10;
+	by _datasrt _blcksrt _EVENT10 _trt _cat;
+run;
+
+data _temp10;
+	set _anal10;
+	output;
+run;
+
+proc sort data=_temp10 out=_temp910 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT10 _trt usubjid;
+run;
+
+proc freq data=_temp910;
+	format _EVENT10;
+	tables _datasrt*_blcksrt*_cat * _EVENT10 * _trt / sparse norow nocol nopercent 
+		out=_pct10(drop=percent);
+run;
+
+proc sort data=_anal10 out=_denom10(keep=_datasrt _cat) nodupkey;
+	by _datasrt _cat;
+run;
+
+data _denom10;
+	set _denom10;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf10;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom10 out=_denomin10(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame10;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=4;
+	length _EVENT10 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT10=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT10=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT10=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame10;
+	by _datasrt _blcksrt _cat _EVENT10 _trt;
+run;
+
+proc sort data=_pct10;
+	by _datasrt _blcksrt _cat _EVENT10 _trt;
+run;
+
+data _pct10;
+	merge _frame10(in=_inframe) _pct10;
+	by _datasrt _blcksrt _cat _EVENT10 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct10;
+	by _datasrt _blcksrt _EVENT10;
+run;
+
+data _miss10(keep=_datasrt _blcksrt _EVENT10 totcount);
+	set _pct10;
+	where _EVENT10=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT10;
+
+	if first._EVENT10 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT10;
+run;
+
+data _pct10(drop=totcount);
+	merge _pct10 _miss10;
+	by _datasrt _blcksrt _EVENT10;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf10;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin10;
+	by _datasrt _cat;
+run;
+
+data _denomin10;
+	merge _denomf10(in=_inframe) _denomin10;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=4;
+run;
+
+proc sort data=_pct10;
+	by _datasrt _cat;
+run;
+
+data _pct10;
+	if 0 then
+		set _basetemplate;
+	merge _denomin10(in=_a) _pct10;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT10 ";
+	_vrlabel=" ";
+	_rwlabel="Withdrawn from the study ";
+
+	if _EVENT10=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT10=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct10;
+	by _datasrt _blcksrt _catord _EVENT10 _trt _cat;
+run;
+
+data _base10;
+	length _catlabl $200;
+	set _pct10 end=eof;
+	by _datasrt _blcksrt _catord _EVENT10 _trt _cat;
+	retain _rowsrt 0 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT10 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=2;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 11 */
+data _anal11;
+	length _EVENT11 8;
+	set _data1;
+	where same and _EVENT11 is not missing;
+	_blcksrt=4;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal11;
+	by _datasrt _blcksrt _EVENT11 _trt _cat;
+run;
+
+data _temp11;
+	set _anal11;
+	output;
+run;
+
+proc sort data=_temp11 out=_temp911 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT11 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp911;
+	format _EVENT11;
+	tables _datasrt*_blcksrt*_cat * _EVENT11 * _trt / sparse norow nocol nopercent 
+		out=_pct11(drop=percent);
+run;
+
+proc sort data=_anal11 out=_denom11(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom11;
+	set _denom11;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf11;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom11 out=_denomin11(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame11;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=4;
+	length _EVENT11 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT11=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT11=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT11=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame11;
+	by _datasrt _blcksrt _cat _EVENT11 _trt;
+run;
+
+proc sort data=_pct11;
+	by _datasrt _blcksrt _cat _EVENT11 _trt;
+run;
+
+data _pct11;
+	merge _frame11(in=_inframe) _pct11;
+	by _datasrt _blcksrt _cat _EVENT11 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct11;
+	by _datasrt _blcksrt _EVENT11;
+run;
+
+data _miss11(keep=_datasrt _blcksrt _EVENT11 totcount);
+	set _pct11;
+	where _EVENT11=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT11;
+
+	if first._EVENT11 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT11;
+run;
+
+data _pct11(drop=totcount);
+	merge _pct11 _miss11;
+	by _datasrt _blcksrt _EVENT11;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf11;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin11;
+	by _datasrt _cat;
+run;
+
+data _denomin11;
+	merge _denomf11(in=_inframe) _denomin11;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=4;
+run;
+
+proc sort data=_pct11;
+	by _datasrt _cat;
+run;
+
+data _pct11;
+	if 0 then
+		set _basetemplate;
+	merge _denomin11(in=_a) _pct11;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT11 ";
+	_vrlabel=" ";
+	_rwlabel="Withdrawn after Dose 1 and before Dose 2 ";
+
+	if _EVENT11=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT11=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct11;
+	by _datasrt _blcksrt _catord _EVENT11 _trt _cat;
+run;
+
+data _base11;
+	length _catlabl $200;
+	set _pct11 end=eof;
+	by _datasrt _blcksrt _catord _EVENT11 _trt _cat;
+	retain _rowsrt 1 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+	*----------------------------------------------------------------------;
+	* Format percent to append to display value in _CVALUE ;
+	*----------------------------------------------------------------------;
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			*----------------------------------------------------------------------;
+			* Put character A0x at right most character to pad text;
+			*----------------------------------------------------------------------;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT11 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=4;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 12 */
+data _anal12;
+	length _EVENT12 8;
+	set _data1;
+	where same and _EVENT12 is not missing;
+	_blcksrt=4;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal12;
+	by _datasrt _blcksrt _EVENT12 _trt _cat;
+run;
+
+data _temp12;
+	set _anal12;
+	output;
+run;
+
+proc sort data=_temp12 out=_temp912 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT12 _trt usubjid;
+run;
+
+proc freq data=_temp912;
+	format _EVENT12;
+	tables _datasrt*_blcksrt*_cat * _EVENT12 * _trt / sparse norow nocol nopercent 
+		out=_pct12(drop=percent);
+run;
+
+proc sort data=_anal12 out=_denom12(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom12;
+	set _denom12;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf12;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom12 out=_denomin12(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame12;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=4;
+	length _EVENT12 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT12=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT12=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT12=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame12;
+	by _datasrt _blcksrt _cat _EVENT12 _trt;
+run;
+
+proc sort data=_pct12;
+	by _datasrt _blcksrt _cat _EVENT12 _trt;
+run;
+
+data _pct12;
+	merge _frame12(in=_inframe) _pct12;
+	by _datasrt _blcksrt _cat _EVENT12 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct12;
+	by _datasrt _blcksrt _EVENT12;
+run;
+
+data _miss12(keep=_datasrt _blcksrt _EVENT12 totcount);
+	set _pct12;
+	where _EVENT12=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT12;
+
+	if first._EVENT12 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT12;
+run;
+
+data _pct12(drop=totcount);
+	merge _pct12 _miss12;
+	by _datasrt _blcksrt _EVENT12;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf12;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin12;
+	by _datasrt _cat;
+run;
+
+data _denomin12;
+	merge _denomf12(in=_inframe) _denomin12;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=4;
+run;
+
+proc sort data=_pct12;
+	by _datasrt _cat;
+run;
+
+data _pct12;
+	if 0 then
+		set _basetemplate;
+	merge _denomin12(in=_a) _pct12;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT12 ";
+	_vrlabel=" ";
+	_rwlabel="Withdrawn after Dose 2 and before 1-month post(*ESC*){unicode 2013}Dose 2 visit ";
+
+	if _EVENT12=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT12=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct12;
+	by _datasrt _blcksrt _catord _EVENT12 _trt _cat;
+run;
+
+data _base12;
+	length _catlabl $200;
+	set _pct12 end=eof;
+	by _datasrt _blcksrt _catord _EVENT12 _trt _cat;
+	retain _rowsrt 2 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT12 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=4;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 13 */
+data _anal13;
+	length _EVENT13 8;
+	set _data1;
+	where same and _EVENT13 is not missing;
+	_blcksrt=4;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal13;
+	by _datasrt _blcksrt _EVENT13 _trt _cat;
+run;
+
+data _temp13;
+	set _anal13;
+	output;
+run;
+
+proc sort data=_temp13 out=_temp913 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT13 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp913;
+	format _EVENT13;
+	tables _datasrt*_blcksrt*_cat * _EVENT13 * _trt / sparse norow nocol nopercent 
+		out=_pct13(drop=percent);
+run;
+
+proc sort data=_anal13 out=_denom13(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom13;
+	set _denom13;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf13;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom13 out=_denomin13(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame13;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=4;
+	length _EVENT13 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT13=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT13=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT13=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame13;
+	by _datasrt _blcksrt _cat _EVENT13 _trt;
+run;
+
+proc sort data=_pct13;
+	by _datasrt _blcksrt _cat _EVENT13 _trt;
+run;
+
+data _pct13;
+	merge _frame13(in=_inframe) _pct13;
+	by _datasrt _blcksrt _cat _EVENT13 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct13;
+	by _datasrt _blcksrt _EVENT13;
+run;
+
+data _miss13(keep=_datasrt _blcksrt _EVENT13 totcount);
+	set _pct13;
+	where _EVENT13=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT13;
+
+	if first._EVENT13 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT13;
+run;
+
+data _pct13(drop=totcount);
+	merge _pct13 _miss13;
+	by _datasrt _blcksrt _EVENT13;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf13;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin13;
+	by _datasrt _cat;
+run;
+
+data _denomin13;
+	merge _denomf13(in=_inframe) _denomin13;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=4;
+run;
+
+proc sort data=_pct13;
+	by _datasrt _cat;
+run;
+
+data _pct13;
+	if 0 then
+		set _basetemplate;
+	merge _denomin13(in=_a) _pct13;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT13 ";
+	_vrlabel=" ";
+	_rwlabel="Withdrawn after 1-month post(*ESC*){unicode 2013}Dose 2 visit ";
+
+	if _EVENT13=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT13=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct13;
+	by _datasrt _blcksrt _catord _EVENT13 _trt _cat;
+run;
+
+data _base13;
+	length _catlabl $200;
+	set _pct13 end=eof;
+	by _datasrt _blcksrt _catord _EVENT13 _trt _cat;
+	retain _rowsrt 3 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT13 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=4;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 14 */
+data _anal14;
+	length DSDECODN 8;
+	set _data1;
+	where same and DSDECODN is not missing;
+	_blcksrt=4;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal14;
+	by _datasrt _blcksrt DSDECODN _trt _cat;
+run;
+
+data _temp14;
+	set _anal14;
+	output;
+run;
+
+proc sort data=_temp14 out=_temp914 nodupkey;
+	by _datasrt _blcksrt _cat DSDECODN _trt usubjid;
+	where RANDFL eq 'Y' and DSPHASEN=31 and EOSDCDT ne . and dsdecodn not in (. 2) 
+		and (VAX101DT ne . or VAX102DT ne .) and (unblnddt=. or eosdcdt<unblnddt) and 
+		EOSDCDT ne EOTXDCDT;
+run;
+
+proc freq data=_temp914;
+	format DSDECODN;
+	tables _datasrt*_blcksrt*_cat * DSDECODN * _trt / sparse norow nocol nopercent 
+		out=_pct14(drop=percent);
+run;
+
+proc sort data=_anal14 out=_denom14(keep=_datasrt _cat) nodupkey;
+	where RANDFL eq 'Y' and DSPHASEN=31 and EOSDCDT ne . and dsdecodn not in (. 2) 
+		and (VAX101DT ne . or VAX102DT ne .) and (unblnddt=. or eosdcdt<unblnddt) and 
+		EOSDCDT ne EOTXDCDT;
+	by _datasrt _cat;
+run;
+
+data _denom14;
+	set _denom14;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf14;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom14 out=_denomin14(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+proc sort data=_pct14 out=_expv14 (keep=_datasrt _blcksrt DSDECODN) nodupkey;
+	by _datasrt _blcksrt DSDECODN;
+run;
+
+proc sort data=_expv14;
+	by _datasrt _blcksrt DSDECODN;
+run;
+
+data _frame14;
+	set _expv14;
+	by _datasrt _blcksrt DSDECODN;
+
+	if first._blcksrt then
+		_catord=0;
+	_catord + 1;
+	_trt=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_cat=1;
+	output;
+	_trt=3;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame14;
+	by _datasrt _blcksrt _cat DSDECODN _trt;
+run;
+
+proc sort data=_pct14;
+	by _datasrt _blcksrt _cat DSDECODN _trt;
+run;
+
+data _pct14;
+	merge _frame14(in=_inframe) _pct14;
+	by _datasrt _blcksrt _cat DSDECODN _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct14;
+	by _datasrt _blcksrt DSDECODN;
+run;
+
+data _miss14(keep=_datasrt _blcksrt DSDECODN totcount);
+	set _pct14;
+	where DSDECODN=9998;
+	retain totcount;
+	by _datasrt _blcksrt DSDECODN;
+
+	if first.DSDECODN then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last.DSDECODN;
+run;
+
+data _pct14(drop=totcount);
+	merge _pct14 _miss14;
+	by _datasrt _blcksrt DSDECODN;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf14;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin14;
+	by _datasrt _cat;
+run;
+
+data _denomin14;
+	merge _denomf14(in=_inframe) _denomin14;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=4;
+run;
+
+proc sort data=_pct14;
+	by _datasrt _cat;
+run;
+
+data _pct14;
+	if 0 then
+		set _basetemplate;
+	merge _denomin14(in=_a) _pct14;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="DSDECODN ";
+	_vrlabel="Reason for withdrawal from the study ";
+	_rwlabel=put(DSDECODN, dsdecod.);
+
+	if DSDECODN=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if DSDECODN=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct14;
+	by _datasrt _blcksrt _catord DSDECODN _trt _cat;
+run;
+
+data _base14;
+	length _catlabl $200;
+	set _pct14 end=eof;
+	by _datasrt _blcksrt _catord DSDECODN _trt _cat;
+	retain _rowsrt 4 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			*----------------------------------------------------------------------;
+			* Put character A0x at right most character to pad text;
+			*----------------------------------------------------------------------;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first.DSDECODN then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=8;
+	_dptindt=4;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 15 */
+data _anal15;
+	length _EVENT15 8;
+	set _data1;
+	where same and _EVENT15 is not missing;
+	_blcksrt=5;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal15;
+	by _datasrt _blcksrt _EVENT15 _trt _cat;
+run;
+
+data _temp15;
+	set _anal15;
+	output;
+run;
+
+proc sort data=_temp15 out=_temp915 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT15 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp915;
+	format _EVENT15;
+	tables _datasrt*_blcksrt*_cat * _EVENT15 * _trt / sparse norow nocol nopercent 
+		out=_pct15(drop=percent);
+run;
+
+proc sort data=_anal15 out=_denom15(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom15;
+	set _denom15;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf15;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom15 out=_denomin15(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame15;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=5;
+	length _EVENT15 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT15=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT15=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT15=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame15;
+	by _datasrt _blcksrt _cat _EVENT15 _trt;
+run;
+
+proc sort data=_pct15;
+	by _datasrt _blcksrt _cat _EVENT15 _trt;
+run;
+
+data _pct15;
+	merge _frame15(in=_inframe) _pct15;
+	by _datasrt _blcksrt _cat _EVENT15 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct15;
+	by _datasrt _blcksrt _EVENT15;
+run;
+
+data _miss15(keep=_datasrt _blcksrt _EVENT15 totcount);
+	set _pct15;
+	where _EVENT15=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT15;
+
+	if first._EVENT15 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT15;
+run;
+
+data _pct15(drop=totcount);
+	merge _pct15 _miss15;
+	by _datasrt _blcksrt _EVENT15;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf15;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin15;
+	by _datasrt _cat;
+run;
+
+data _denomin15;
+	merge _denomf15(in=_inframe) _denomin15;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=5;
+run;
+
+proc sort data=_pct15;
+	by _datasrt _cat;
+run;
+
+data _pct15;
+	if 0 then
+		set _basetemplate;
+	merge _denomin15(in=_a) _pct15;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT15 ";
+	_vrlabel="Open-label follow-up period ";
+	_rwlabel="Originally randomized to BNT162b2 ";
+
+	if _EVENT15=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT15=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct15;
+	by _datasrt _blcksrt _catord _EVENT15 _trt _cat;
+run;
+
+data _base15;
+	length _catlabl $200;
+	set _pct15 end=eof;
+	by _datasrt _blcksrt _catord _EVENT15 _trt _cat;
+	retain _rowsrt 0 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT15 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=2;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 16 */
+data _anal16;
+	length _EVENT16 8;
+	set _data1;
+	where same and _EVENT16 is not missing;
+	_blcksrt=5;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal16;
+	by _datasrt _blcksrt _EVENT16 _trt _cat;
+run;
+
+data _temp16;
+	set _anal16;
+	output;
+run;
+
+proc sort data=_temp16 out=_temp916 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT16 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp916;
+	format _EVENT16;
+	tables _datasrt*_blcksrt*_cat * _EVENT16 * _trt / sparse norow nocol nopercent 
+		out=_pct16(drop=percent);
+run;
+
+proc sort data=_anal16 out=_denom16(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom16;
+	set _denom16;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf16;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom16 out=_denomin16(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame16;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=5;
+	length _EVENT16 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT16=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT16=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT16=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame16;
+	by _datasrt _blcksrt _cat _EVENT16 _trt;
+run;
+
+proc sort data=_pct16;
+	by _datasrt _blcksrt _cat _EVENT16 _trt;
+run;
+
+data _pct16;
+	merge _frame16(in=_inframe) _pct16;
+	by _datasrt _blcksrt _cat _EVENT16 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct16;
+	by _datasrt _blcksrt _EVENT16;
+run;
+
+data _miss16(keep=_datasrt _blcksrt _EVENT16 totcount);
+	set _pct16;
+	where _EVENT16=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT16;
+
+	if first._EVENT16 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT16;
+run;
+
+data _pct16(drop=totcount);
+	merge _pct16 _miss16;
+	by _datasrt _blcksrt _EVENT16;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf16;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin16;
+	by _datasrt _cat;
+run;
+
+data _denomin16;
+	merge _denomf16(in=_inframe) _denomin16;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=5;
+run;
+
+proc sort data=_pct16;
+	by _datasrt _cat;
+run;
+
+data _pct16;
+	if 0 then
+		set _basetemplate;
+	merge _denomin16(in=_a) _pct16;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT16 ";
+	_vrlabel=" ";
+	_rwlabel="Received Dose 2/unplanned dose ";
+
+	if _EVENT16=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT16=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct16;
+	by _datasrt _blcksrt _catord _EVENT16 _trt _cat;
+run;
+
+data _base16;
+	length _catlabl $200;
+	set _pct16 end=eof;
+	by _datasrt _blcksrt _catord _EVENT16 _trt _cat;
+	retain _rowsrt 1 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT16 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=4;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 17 */
+data _anal17;
+	length _EVENT17 8;
+	set _data1;
+	where same and _EVENT17 is not missing;
+	_blcksrt=5;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal17;
+	by _datasrt _blcksrt _EVENT17 _trt _cat;
+run;
+
+data _temp17;
+	set _anal17;
+	output;
+run;
+
+proc sort data=_temp17 out=_temp917 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT17 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp917;
+	format _EVENT17;
+	tables _datasrt*_blcksrt*_cat * _EVENT17 * _trt / sparse norow nocol nopercent 
+		out=_pct17(drop=percent);
+run;
+
+proc sort data=_anal17 out=_denom17(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom17;
+	set _denom17;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf17;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom17 out=_denomin17(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame17;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=5;
+	length _EVENT17 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT17=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT17=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT17=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame17;
+	by _datasrt _blcksrt _cat _EVENT17 _trt;
+run;
+
+proc sort data=_pct17;
+	by _datasrt _blcksrt _cat _EVENT17 _trt;
+run;
+
+data _pct17;
+	merge _frame17(in=_inframe) _pct17;
+	by _datasrt _blcksrt _cat _EVENT17 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct17;
+	by _datasrt _blcksrt _EVENT17;
+run;
+
+data _miss17(keep=_datasrt _blcksrt _EVENT17 totcount);
+	set _pct17;
+	where _EVENT17=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT17;
+
+	if first._EVENT17 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT17;
+run;
+
+data _pct17(drop=totcount);
+	merge _pct17 _miss17;
+	by _datasrt _blcksrt _EVENT17;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf17;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin17;
+	by _datasrt _cat;
+run;
+
+data _denomin17;
+	merge _denomf17(in=_inframe) _denomin17;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=5;
+run;
+
+proc sort data=_pct17;
+	by _datasrt _cat;
+run;
+
+data _pct17;
+	if 0 then
+		set _basetemplate;
+	merge _denomin17(in=_a) _pct17;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT17 ";
+	_vrlabel=" ";
+	_rwlabel="Completed 1-month post(*ESC*){unicode 2013}Dose 2 visit ";
+
+	if _EVENT17=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT17=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct17;
+	by _datasrt _blcksrt _catord _EVENT17 _trt _cat;
+run;
+
+data _base17;
+	length _catlabl $200;
+	set _pct17 end=eof;
+	by _datasrt _blcksrt _catord _EVENT17 _trt _cat;
+	retain _rowsrt 2 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT17 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=4;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 18 */
+data _anal18;
+	length _EVENT18 8;
+	set _data1;
+	where same and _EVENT18 is not missing;
+	_blcksrt=5;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal18;
+	by _datasrt _blcksrt _EVENT18 _trt _cat;
+run;
+
+data _temp18;
+	set _anal18;
+	output;
+run;
+
+proc sort data=_temp18 out=_temp918 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT18 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp918;
+	format _EVENT18;
+	tables _datasrt*_blcksrt*_cat * _EVENT18 * _trt / sparse norow nocol nopercent 
+		out=_pct18(drop=percent);
+run;
+
+proc sort data=_anal18 out=_denom18(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom18;
+	set _denom18;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf18;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom18 out=_denomin18(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame18;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=5;
+	length _EVENT18 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT18=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT18=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT18=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame18;
+	by _datasrt _blcksrt _cat _EVENT18 _trt;
+run;
+
+proc sort data=_pct18;
+	by _datasrt _blcksrt _cat _EVENT18 _trt;
+run;
+
+data _pct18;
+	merge _frame18(in=_inframe) _pct18;
+	by _datasrt _blcksrt _cat _EVENT18 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct18;
+	by _datasrt _blcksrt _EVENT18;
+run;
+
+data _miss18(keep=_datasrt _blcksrt _EVENT18 totcount);
+	set _pct18;
+	where _EVENT18=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT18;
+
+	if first._EVENT18 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT18;
+run;
+
+data _pct18(drop=totcount);
+	merge _pct18 _miss18;
+	by _datasrt _blcksrt _EVENT18;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf18;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin18;
+	by _datasrt _cat;
+run;
+
+data _denomin18;
+	merge _denomf18(in=_inframe) _denomin18;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=5;
+run;
+
+proc sort data=_pct18;
+	by _datasrt _cat;
+run;
+
+data _pct18;
+	if 0 then
+		set _basetemplate;
+	merge _denomin18(in=_a) _pct18;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT18 ";
+	_vrlabel=" ";
+	_rwlabel="Completed 6-month post(*ESC*){unicode 2013}Dose 2 visit ";
+
+	if _EVENT18=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT18=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct18;
+	by _datasrt _blcksrt _catord _EVENT18 _trt _cat;
+run;
+
+data _base18;
+	length _catlabl $200;
+	set _pct18 end=eof;
+	by _datasrt _blcksrt _catord _EVENT18 _trt _cat;
+	retain _rowsrt 3 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT18 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=4;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 19 */
+data _anal19;
+	length _EVENT19 8;
+	set _data1;
+	where same and _EVENT19 is not missing;
+	_blcksrt=5;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal19;
+	by _datasrt _blcksrt _EVENT19 _trt _cat;
+run;
+
+data _temp19;
+	set _anal19;
+	output;
+run;
+
+proc sort data=_temp19 out=_temp919 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT19 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp919;
+	format _EVENT19;
+	tables _datasrt*_blcksrt*_cat * _EVENT19 * _trt / sparse norow nocol nopercent 
+		out=_pct19(drop=percent);
+run;
+
+proc sort data=_anal19 out=_denom19(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom19;
+	set _denom19;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf19;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom19 out=_denomin19(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame19;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=5;
+	length _EVENT19 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT19=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT19=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT19=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame19;
+	by _datasrt _blcksrt _cat _EVENT19 _trt;
+run;
+
+proc sort data=_pct19;
+	by _datasrt _blcksrt _cat _EVENT19 _trt;
+run;
+
+data _pct19;
+	merge _frame19(in=_inframe) _pct19;
+	by _datasrt _blcksrt _cat _EVENT19 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct19;
+	by _datasrt _blcksrt _EVENT19;
+run;
+
+data _miss19(keep=_datasrt _blcksrt _EVENT19 totcount);
+	set _pct19;
+	where _EVENT19=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT19;
+
+	if first._EVENT19 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT19;
+run;
+
+data _pct19(drop=totcount);
+	merge _pct19 _miss19;
+	by _datasrt _blcksrt _EVENT19;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf19;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin19;
+	by _datasrt _cat;
+run;
+
+data _denomin19;
+	merge _denomf19(in=_inframe) _denomin19;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=5;
+run;
+
+proc sort data=_pct19;
+	by _datasrt _cat;
+run;
+
+data _pct19;
+	if 0 then
+		set _basetemplate;
+	merge _denomin19(in=_a) _pct19;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT19 ";
+	_vrlabel=" ";
+	_rwlabel="Withdrawn from the study ";
+
+	if _EVENT19=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT19=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct19;
+	by _datasrt _blcksrt _catord _EVENT19 _trt _cat;
+run;
+
+data _base19;
+	length _catlabl $200;
+	set _pct19 end=eof;
+	by _datasrt _blcksrt _catord _EVENT19 _trt _cat;
+	retain _rowsrt 4 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT19 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=4;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 20 */
+data _anal20;
+	length _EVENT20 8;
+	set _data1;
+	where same and _EVENT20 is not missing;
+	_blcksrt=5;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal20;
+	by _datasrt _blcksrt _EVENT20 _trt _cat;
+run;
+
+data _temp20;
+	set _anal20;
+	output;
+run;
+
+proc sort data=_temp20 out=_temp920 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT20 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp920;
+	format _EVENT20;
+	tables _datasrt*_blcksrt*_cat * _EVENT20 * _trt / sparse norow nocol nopercent 
+		out=_pct20(drop=percent);
+run;
+
+proc sort data=_anal20 out=_denom20(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom20;
+	set _denom20;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf20;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom20 out=_denomin20(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame20;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=5;
+	length _EVENT20 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT20=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT20=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT20=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame20;
+	by _datasrt _blcksrt _cat _EVENT20 _trt;
+run;
+
+proc sort data=_pct20;
+	by _datasrt _blcksrt _cat _EVENT20 _trt;
+run;
+
+data _pct20;
+	merge _frame20(in=_inframe) _pct20;
+	by _datasrt _blcksrt _cat _EVENT20 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct20;
+	by _datasrt _blcksrt _EVENT20;
+run;
+
+data _miss20(keep=_datasrt _blcksrt _EVENT20 totcount);
+	set _pct20;
+	where _EVENT20=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT20;
+
+	if first._EVENT20 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT20;
+run;
+
+data _pct20(drop=totcount);
+	merge _pct20 _miss20;
+	by _datasrt _blcksrt _EVENT20;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf20;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin20;
+	by _datasrt _cat;
+run;
+
+data _denomin20;
+	merge _denomf20(in=_inframe) _denomin20;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=5;
+run;
+
+proc sort data=_pct20;
+	by _datasrt _cat;
+run;
+
+data _pct20;
+	if 0 then
+		set _basetemplate;
+	merge _denomin20(in=_a) _pct20;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT20 ";
+	_vrlabel=" ";
+	_rwlabel="Withdrawn before 6-month post(*ESC*){unicode 2013}Dose 2 visit ";
+
+	if _EVENT20=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT20=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct20;
+	by _datasrt _blcksrt _catord _EVENT20 _trt _cat;
+run;
+
+data _base20;
+	length _catlabl $200;
+	set _pct20 end=eof;
+	by _datasrt _blcksrt _catord _EVENT20 _trt _cat;
+	retain _rowsrt 5 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT20 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=6;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 21 */
+data _anal21;
+	length _EVENT21 8;
+	set _data1;
+	where same and _EVENT21 is not missing;
+	_blcksrt=5;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal21;
+	by _datasrt _blcksrt _EVENT21 _trt _cat;
+run;
+
+data _temp21;
+	set _anal21;
+	output;
+run;
+
+proc sort data=_temp21 out=_temp921 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT21 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp921;
+	format _EVENT21;
+	tables _datasrt*_blcksrt*_cat * _EVENT21 * _trt / sparse norow nocol nopercent 
+		out=_pct21(drop=percent);
+run;
+
+proc sort data=_anal21 out=_denom21(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom21;
+	set _denom21;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf21;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom21 out=_denomin21(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame21;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=5;
+	length _EVENT21 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT21=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT21=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT21=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame21;
+	by _datasrt _blcksrt _cat _EVENT21 _trt;
+run;
+
+proc sort data=_pct21;
+	by _datasrt _blcksrt _cat _EVENT21 _trt;
+run;
+
+data _pct21;
+	merge _frame21(in=_inframe) _pct21;
+	by _datasrt _blcksrt _cat _EVENT21 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct21;
+	by _datasrt _blcksrt _EVENT21;
+run;
+
+data _miss21(keep=_datasrt _blcksrt _EVENT21 totcount);
+	set _pct21;
+	where _EVENT21=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT21;
+
+	if first._EVENT21 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT21;
+run;
+
+data _pct21(drop=totcount);
+	merge _pct21 _miss21;
+	by _datasrt _blcksrt _EVENT21;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf21;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin21;
+	by _datasrt _cat;
+run;
+
+data _denomin21;
+	merge _denomf21(in=_inframe) _denomin21;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=5;
+run;
+
+proc sort data=_pct21;
+	by _datasrt _cat;
+run;
+
+data _pct21;
+	if 0 then
+		set _basetemplate;
+	merge _denomin21(in=_a) _pct21;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT21 ";
+	_vrlabel=" ";
+	_rwlabel="Withdrawn after 6-month post(*ESC*){unicode 2013}Dose 2 visit ";
+
+	if _EVENT21=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT21=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct21;
+	by _datasrt _blcksrt _catord _EVENT21 _trt _cat;
+run;
+
+data _base21;
+	length _catlabl $200;
+	set _pct21 end=eof;
+	by _datasrt _blcksrt _catord _EVENT21 _trt _cat;
+	retain _rowsrt 6 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT21 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=6;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 22 */
+data _anal22;
+	length DSDECODN 8;
+	set _data1;
+	where same and DSDECODN is not missing;
+	_blcksrt=5;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal22;
+	by _datasrt _blcksrt DSDECODN _trt _cat;
+run;
+
+data _temp22;
+	set _anal22;
+	output;
+run;
+
+proc sort data=_temp22 out=_temp922 nodupkey;
+	by _datasrt _blcksrt _cat DSDECODN _trt usubjid;
+	where RANDFL eq 'Y' and DSPHASEN=31 and EOSDCDT ne . and dsdecodn not in (. 2) 
+		and (VAX101DT ne . or VAX102DT ne .) and (unblnddt ne . and 
+		eosdcdt>=unblnddt) and index(arm, 'BNT');
+run;
+
+proc freq data=_temp922;
+	format DSDECODN;
+	tables _datasrt*_blcksrt*_cat * DSDECODN * _trt / sparse norow nocol nopercent 
+		out=_pct22(drop=percent);
+run;
+
+proc sort data=_anal22 out=_denom22(keep=_datasrt _cat) nodupkey;
+	where RANDFL eq 'Y' and DSPHASEN=31 and EOSDCDT ne . and dsdecodn not in (. 2) 
+		and (VAX101DT ne . or VAX102DT ne .) and (unblnddt ne . and 
+		eosdcdt>=unblnddt) and index(arm, 'BNT');
+	by _datasrt _cat;
+run;
+
+data _denom22;
+	set _denom22;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf22;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom22 out=_denomin22(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+proc sort data=_pct22 out=_expv22 (keep=_datasrt _blcksrt DSDECODN) nodupkey;
+	by _datasrt _blcksrt DSDECODN;
+run;
+
+proc sort data=_expv22;
+	by _datasrt _blcksrt DSDECODN;
+run;
+
+data _frame22;
+	set _expv22;
+	by _datasrt _blcksrt DSDECODN;
+
+	if first._blcksrt then
+		_catord=0;
+	_catord + 1;
+	_trt=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_cat=1;
+	output;
+	_trt=3;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame22;
+	by _datasrt _blcksrt _cat DSDECODN _trt;
+run;
+
+proc sort data=_pct22;
+	by _datasrt _blcksrt _cat DSDECODN _trt;
+run;
+
+data _pct22;
+	merge _frame22(in=_inframe) _pct22;
+	by _datasrt _blcksrt _cat DSDECODN _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct22;
+	by _datasrt _blcksrt DSDECODN;
+run;
+
+data _miss22(keep=_datasrt _blcksrt DSDECODN totcount);
+	set _pct22;
+	where DSDECODN=9998;
+	retain totcount;
+	by _datasrt _blcksrt DSDECODN;
+
+	if first.DSDECODN then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last.DSDECODN;
+run;
+
+data _pct22(drop=totcount);
+	merge _pct22 _miss22;
+	by _datasrt _blcksrt DSDECODN;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf22;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin22;
+	by _datasrt _cat;
+run;
+
+data _denomin22;
+	merge _denomf22(in=_inframe) _denomin22;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=5;
+run;
+
+proc sort data=_pct22;
+	by _datasrt _cat;
+run;
+
+data _pct22;
+	if 0 then
+		set _basetemplate;
+	merge _denomin22(in=_a) _pct22;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="DSDECODN ";
+	_vrlabel="Reason for withdrawal from the study ";
+	_rwlabel=put(DSDECODN, dsdecod.);
+
+	if DSDECODN=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if DSDECODN=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct22;
+	by _datasrt _blcksrt _catord DSDECODN _trt _cat;
+run;
+
+data _base22;
+	length _catlabl $200;
+	set _pct22 end=eof;
+	by _datasrt _blcksrt _catord DSDECODN _trt _cat;
+	retain _rowsrt 7 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			*----------------------------------------------------------------------;
+			* Put character A0x at right most character to pad text;
+			*----------------------------------------------------------------------;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first.DSDECODN then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=8;
+	_dptindt=4;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 23 */
+data _anal23;
+	length _EVENT23 8;
+	set _data1;
+	where same and _EVENT23 is not missing;
+	_blcksrt=6;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal23;
+	by _datasrt _blcksrt _EVENT23 _trt _cat;
+run;
+
+data _temp23;
+	set _anal23;
+	output;
+run;
+
+proc sort data=_temp23 out=_temp923 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT23 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp923;
+	format _EVENT23;
+	tables _datasrt*_blcksrt*_cat * _EVENT23 * _trt / sparse norow nocol nopercent 
+		out=_pct23(drop=percent);
+run;
+
+proc sort data=_anal23 out=_denom23(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom23;
+	set _denom23;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf23;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom23 out=_denomin23(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame23;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=6;
+	length _EVENT23 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT23=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT23=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT23=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame23;
+	by _datasrt _blcksrt _cat _EVENT23 _trt;
+run;
+
+proc sort data=_pct23;
+	by _datasrt _blcksrt _cat _EVENT23 _trt;
+run;
+
+data _pct23;
+	merge _frame23(in=_inframe) _pct23;
+	by _datasrt _blcksrt _cat _EVENT23 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct23;
+	by _datasrt _blcksrt _EVENT23;
+run;
+
+data _miss23(keep=_datasrt _blcksrt _EVENT23 totcount);
+	set _pct23;
+	where _EVENT23=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT23;
+
+	if first._EVENT23 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT23;
+run;
+
+data _pct23(drop=totcount);
+	merge _pct23 _miss23;
+	by _datasrt _blcksrt _EVENT23;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf23;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin23;
+	by _datasrt _cat;
+run;
+
+data _denomin23;
+	merge _denomf23(in=_inframe) _denomin23;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=6;
+run;
+
+proc sort data=_pct23;
+	by _datasrt _cat;
+run;
+
+data _pct23;
+	if 0 then
+		set _basetemplate;
+	merge _denomin23(in=_a) _pct23;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT23 ";
+	_vrlabel=" ";
+	_rwlabel="Originally randomized to placebo ";
+
+	if _EVENT23=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT23=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct23;
+	by _datasrt _blcksrt _catord _EVENT23 _trt _cat;
+run;
+
+data _base23;
+	length _catlabl $200;
+	set _pct23 end=eof;
+	by _datasrt _blcksrt _catord _EVENT23 _trt _cat;
+	retain _rowsrt 0 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT23 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=2;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 24 */
+data _anal24;
+	length _EVENT24 8;
+	set _data1;
+	where same and _EVENT24 is not missing;
+	_blcksrt=6;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal24;
+	by _datasrt _blcksrt _EVENT24 _trt _cat;
+run;
+
+data _temp24;
+	set _anal24;
+	output;
+run;
+
+proc sort data=_temp24 out=_temp924 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT24 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp924;
+	format _EVENT24;
+	tables _datasrt*_blcksrt*_cat * _EVENT24 * _trt / sparse norow nocol nopercent 
+		out=_pct24(drop=percent);
+run;
+
+proc sort data=_anal24 out=_denom24(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom24;
+	set _denom24;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf24;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom24 out=_denomin24(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame24;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=6;
+	length _EVENT24 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT24=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT24=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT24=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame24;
+	by _datasrt _blcksrt _cat _EVENT24 _trt;
+run;
+
+proc sort data=_pct24;
+	by _datasrt _blcksrt _cat _EVENT24 _trt;
+run;
+
+data _pct24;
+	merge _frame24(in=_inframe) _pct24;
+	by _datasrt _blcksrt _cat _EVENT24 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct24;
+	by _datasrt _blcksrt _EVENT24;
+run;
+
+data _miss24(keep=_datasrt _blcksrt _EVENT24 totcount);
+	set _pct24;
+	where _EVENT24=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT24;
+
+	if first._EVENT24 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT24;
+run;
+
+data _pct24(drop=totcount);
+	merge _pct24 _miss24;
+	by _datasrt _blcksrt _EVENT24;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf24;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin24;
+	by _datasrt _cat;
+run;
+
+data _denomin24;
+	merge _denomf24(in=_inframe) _denomin24;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=6;
+run;
+
+proc sort data=_pct24;
+	by _datasrt _cat;
+run;
+
+data _pct24;
+	if 0 then
+		set _basetemplate;
+	merge _denomin24(in=_a) _pct24;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT24 ";
+	_vrlabel=" ";
+	_rwlabel="Withdrawn from the study after unblinding and before Dose 3 ";
+
+	if _EVENT24=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT24=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct24;
+	by _datasrt _blcksrt _catord _EVENT24 _trt _cat;
+run;
+
+data _base24;
+	length _catlabl $200;
+	set _pct24 end=eof;
+	by _datasrt _blcksrt _catord _EVENT24 _trt _cat;
+	retain _rowsrt 1 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT24 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=4;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 25 */
+data _anal25;
+	length _EVENT25 8;
+	set _data1;
+	where same and _EVENT25 is not missing;
+	_blcksrt=6;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal25;
+	by _datasrt _blcksrt _EVENT25 _trt _cat;
+run;
+
+data _temp25;
+	set _anal25;
+	output;
+run;
+
+proc sort data=_temp25 out=_temp925 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT25 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp925;
+	format _EVENT25;
+	tables _datasrt*_blcksrt*_cat * _EVENT25 * _trt / sparse norow nocol nopercent 
+		out=_pct25(drop=percent);
+run;
+
+proc sort data=_anal25 out=_denom25(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom25;
+	set _denom25;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf25;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom25 out=_denomin25(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame25;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=6;
+	length _EVENT25 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT25=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT25=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT25=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame25;
+	by _datasrt _blcksrt _cat _EVENT25 _trt;
+run;
+
+proc sort data=_pct25;
+	by _datasrt _blcksrt _cat _EVENT25 _trt;
+run;
+
+data _pct25;
+	merge _frame25(in=_inframe) _pct25;
+	by _datasrt _blcksrt _cat _EVENT25 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct25;
+	by _datasrt _blcksrt _EVENT25;
+run;
+
+data _miss25(keep=_datasrt _blcksrt _EVENT25 totcount);
+	set _pct25;
+	where _EVENT25=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT25;
+
+	if first._EVENT25 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT25;
+run;
+
+data _pct25(drop=totcount);
+	merge _pct25 _miss25;
+	by _datasrt _blcksrt _EVENT25;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf25;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin25;
+	by _datasrt _cat;
+run;
+
+data _denomin25;
+	merge _denomf25(in=_inframe) _denomin25;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=6;
+run;
+
+proc sort data=_pct25;
+	by _datasrt _cat;
+run;
+
+data _pct25;
+	if 0 then
+		set _basetemplate;
+	merge _denomin25(in=_a) _pct25;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT25 ";
+	_vrlabel=" ";
+	_rwlabel="Received Dose 3 (first dose of BNT162b2 [30 (*ESC*){unicode 03BC}g]) ";
+
+	if _EVENT25=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT25=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct25;
+	by _datasrt _blcksrt _catord _EVENT25 _trt _cat;
+run;
+
+data _base25;
+	length _catlabl $200;
+	set _pct25 end=eof;
+	by _datasrt _blcksrt _catord _EVENT25 _trt _cat;
+	retain _rowsrt 2 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT25 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=4;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 26 */
+data _anal26;
+	length _EVENT26 8;
+	set _data1;
+	where same and _EVENT26 is not missing;
+	_blcksrt=6;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal26;
+	by _datasrt _blcksrt _EVENT26 _trt _cat;
+run;
+
+data _temp26;
+	set _anal26;
+	output;
+run;
+
+proc sort data=_temp26 out=_temp926 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT26 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp926;
+	format _EVENT26;
+	tables _datasrt*_blcksrt*_cat * _EVENT26 * _trt / sparse norow nocol nopercent 
+		out=_pct26(drop=percent);
+run;
+
+proc sort data=_anal26 out=_denom26(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom26;
+	set _denom26;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf26;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom26 out=_denomin26(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame26;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=6;
+	length _EVENT26 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT26=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT26=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT26=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame26;
+	by _datasrt _blcksrt _cat _EVENT26 _trt;
+run;
+
+proc sort data=_pct26;
+	by _datasrt _blcksrt _cat _EVENT26 _trt;
+run;
+
+data _pct26;
+	merge _frame26(in=_inframe) _pct26;
+	by _datasrt _blcksrt _cat _EVENT26 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct26;
+	by _datasrt _blcksrt _EVENT26;
+run;
+
+data _miss26(keep=_datasrt _blcksrt _EVENT26 totcount);
+	set _pct26;
+	where _EVENT26=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT26;
+
+	if first._EVENT26 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT26;
+run;
+
+data _pct26(drop=totcount);
+	merge _pct26 _miss26;
+	by _datasrt _blcksrt _EVENT26;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf26;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin26;
+	by _datasrt _cat;
+run;
+
+data _denomin26;
+	merge _denomf26(in=_inframe) _denomin26;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=6;
+run;
+
+proc sort data=_pct26;
+	by _datasrt _cat;
+run;
+
+data _pct26;
+	if 0 then
+		set _basetemplate;
+	merge _denomin26(in=_a) _pct26;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT26 ";
+	_vrlabel=" ";
+	_rwlabel="Received Dose 4 (second dose of BNT162b2 [30 (*ESC*){unicode 03BC}g]) ";
+
+	if _EVENT26=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT26=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct26;
+	by _datasrt _blcksrt _catord _EVENT26 _trt _cat;
+run;
+
+data _base26;
+	length _catlabl $200;
+	set _pct26 end=eof;
+	by _datasrt _blcksrt _catord _EVENT26 _trt _cat;
+	retain _rowsrt 3 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT26 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=4;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 27 */
+data _anal27;
+	length _EVENT27 8;
+	set _data1;
+	where same and _EVENT27 is not missing;
+	_blcksrt=7;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal27;
+	by _datasrt _blcksrt _EVENT27 _trt _cat;
+run;
+
+data _temp27;
+	set _anal27;
+	output;
+run;
+
+proc sort data=_temp27 out=_temp927 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT27 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp927;
+	format _EVENT27;
+	tables _datasrt*_blcksrt*_cat * _EVENT27 * _trt / sparse norow nocol nopercent 
+		out=_pct27(drop=percent);
+run;
+
+proc sort data=_anal27 out=_denom27(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom27;
+	set _denom27;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf27;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom27 out=_denomin27(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame27;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=7;
+	length _EVENT27 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT27=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT27=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT27=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame27;
+	by _datasrt _blcksrt _cat _EVENT27 _trt;
+run;
+
+proc sort data=_pct27;
+	by _datasrt _blcksrt _cat _EVENT27 _trt;
+run;
+
+data _pct27;
+	merge _frame27(in=_inframe) _pct27;
+	by _datasrt _blcksrt _cat _EVENT27 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct27;
+	by _datasrt _blcksrt _EVENT27;
+run;
+
+data _miss27(keep=_datasrt _blcksrt _EVENT27 totcount);
+	set _pct27;
+	where _EVENT27=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT27;
+
+	if first._EVENT27 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT27;
+run;
+
+data _pct27(drop=totcount);
+	merge _pct27 _miss27;
+	by _datasrt _blcksrt _EVENT27;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf27;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin27;
+	by _datasrt _cat;
+run;
+
+data _denomin27;
+	merge _denomf27(in=_inframe) _denomin27;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=7;
+run;
+
+proc sort data=_pct27;
+	by _datasrt _cat;
+run;
+
+data _pct27;
+	if 0 then
+		set _basetemplate;
+	merge _denomin27(in=_a) _pct27;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT27 ";
+	_vrlabel=" ";
+	_rwlabel="Discontinued from open-label vaccination period~{super d} ";
+
+	if _EVENT27=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT27=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct27;
+	by _datasrt _blcksrt _catord _EVENT27 _trt _cat;
+run;
+
+data _base27;
+	length _catlabl $200;
+	set _pct27 end=eof;
+	by _datasrt _blcksrt _catord _EVENT27 _trt _cat;
+	retain _rowsrt 0 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT27 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=4;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 28 */
+data _anal28;
+	length DSDECODN 8;
+	set _data1;
+	where same and DSDECODN is not missing;
+	_blcksrt=7;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal28;
+	by _datasrt _blcksrt DSDECODN _trt _cat;
+run;
+
+data _temp28;
+	set _anal28;
+	output;
+run;
+
+proc sort data=_temp28 out=_temp928 nodupkey;
+	by _datasrt _blcksrt _cat DSDECODN _trt usubjid;
+	where RANDFL eq 'Y' and DSPHASEN=7 and EOTXDCDT ne . and dsdecodn not in (. 2) 
+		and vax201dt ne . and index(armcd, 'PLACEBO');
+run;
+
+proc freq data=_temp928;
+	format DSDECODN;
+	tables _datasrt*_blcksrt*_cat * DSDECODN * _trt / sparse norow nocol nopercent 
+		out=_pct28(drop=percent);
+run;
+
+proc sort data=_anal28 out=_denom28(keep=_datasrt _cat) nodupkey;
+	where RANDFL eq 'Y' and DSPHASEN=7 and EOTXDCDT ne . and dsdecodn not in (. 2) 
+		and vax201dt ne . and index(armcd, 'PLACEBO');
+	by _datasrt _cat;
+run;
+
+data _denom28;
+	set _denom28;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf28;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom28 out=_denomin28(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+proc sort data=_pct28 out=_expv28 (keep=_datasrt _blcksrt DSDECODN) nodupkey;
+	by _datasrt _blcksrt DSDECODN;
+run;
+
+proc sort data=_expv28;
+	by _datasrt _blcksrt DSDECODN;
+run;
+
+data _frame28;
+	set _expv28;
+	by _datasrt _blcksrt DSDECODN;
+
+	if first._blcksrt then
+		_catord=0;
+	_catord + 1;
+	_trt=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_cat=1;
+	output;
+	_trt=3;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame28;
+	by _datasrt _blcksrt _cat DSDECODN _trt;
+run;
+
+proc sort data=_pct28;
+	by _datasrt _blcksrt _cat DSDECODN _trt;
+run;
+
+data _pct28;
+	merge _frame28(in=_inframe) _pct28;
+	by _datasrt _blcksrt _cat DSDECODN _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct28;
+	by _datasrt _blcksrt DSDECODN;
+run;
+
+data _miss28(keep=_datasrt _blcksrt DSDECODN totcount);
+	set _pct28;
+	where DSDECODN=9998;
+	retain totcount;
+	by _datasrt _blcksrt DSDECODN;
+
+	if first.DSDECODN then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last.DSDECODN;
+run;
+
+data _pct28(drop=totcount);
+	merge _pct28 _miss28;
+	by _datasrt _blcksrt DSDECODN;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf28;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin28;
+	by _datasrt _cat;
+run;
+
+data _denomin28;
+	merge _denomf28(in=_inframe) _denomin28;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=7;
+run;
+
+proc sort data=_pct28;
+	by _datasrt _cat;
+run;
+
+data _pct28;
+	if 0 then
+		set _basetemplate;
+	merge _denomin28(in=_a) _pct28;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="DSDECODN ";
+	_vrlabel="Reason for discontinuation from open-label vaccination period ";
+	_rwlabel=put(DSDECODN, dsdecod.);
+
+	if DSDECODN=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if DSDECODN=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct28;
+	by _datasrt _blcksrt _catord DSDECODN _trt _cat;
+run;
+
+data _base28;
+	length _catlabl $200;
+	set _pct28 end=eof;
+	by _datasrt _blcksrt _catord DSDECODN _trt _cat;
+	retain _rowsrt 1 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			*----------------------------------------------------------------------;
+			* Put character A0x at right most character to pad text;
+			*----------------------------------------------------------------------;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first.DSDECODN then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=8;
+	_dptindt=4;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 29 */
+data _anal29;
+	length _EVENT29 8;
+	set _data1;
+	where same and _EVENT29 is not missing;
+	_blcksrt=8;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal29;
+	by _datasrt _blcksrt _EVENT29 _trt _cat;
+run;
+
+data _temp29;
+	set _anal29;
+	output;
+run;
+
+proc sort data=_temp29 out=_temp929 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT29 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp929;
+	format _EVENT29;
+	tables _datasrt*_blcksrt*_cat * _EVENT29 * _trt / sparse norow nocol nopercent 
+		out=_pct29(drop=percent);
+run;
+
+proc sort data=_anal29 out=_denom29(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom29;
+	set _denom29;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf29;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom29 out=_denomin29(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame29;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=8;
+	length _EVENT29 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT29=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT29=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT29=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame29;
+	by _datasrt _blcksrt _cat _EVENT29 _trt;
+run;
+
+proc sort data=_pct29;
+	by _datasrt _blcksrt _cat _EVENT29 _trt;
+run;
+
+data _pct29;
+	merge _frame29(in=_inframe) _pct29;
+	by _datasrt _blcksrt _cat _EVENT29 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct29;
+	by _datasrt _blcksrt _EVENT29;
+run;
+
+data _miss29(keep=_datasrt _blcksrt _EVENT29 totcount);
+	set _pct29;
+	where _EVENT29=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT29;
+
+	if first._EVENT29 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT29;
+run;
+
+data _pct29(drop=totcount);
+	merge _pct29 _miss29;
+	by _datasrt _blcksrt _EVENT29;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf29;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin29;
+	by _datasrt _cat;
+run;
+
+data _denomin29;
+	merge _denomf29(in=_inframe) _denomin29;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=8;
+run;
+
+proc sort data=_pct29;
+	by _datasrt _cat;
+run;
+
+data _pct29;
+	if 0 then
+		set _basetemplate;
+	merge _denomin29(in=_a) _pct29;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT29 ";
+	_vrlabel=" ";
+	_rwlabel="Completed 1-month post(*ESC*){unicode 2013}Dose 4 visit ";
+
+	if _EVENT29=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT29=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct29;
+	by _datasrt _blcksrt _catord _EVENT29 _trt _cat;
+run;
+
+data _base29;
+	length _catlabl $200;
+	set _pct29 end=eof;
+	by _datasrt _blcksrt _catord _EVENT29 _trt _cat;
+	retain _rowsrt 0 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT29 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=4;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 30 */
+data _anal30;
+	length _EVENT30 8;
+	set _data1;
+	where same and _EVENT30 is not missing;
+	_blcksrt=9;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal30;
+	by _datasrt _blcksrt _EVENT30 _trt _cat;
+run;
+
+data _temp30;
+	set _anal30;
+	output;
+run;
+
+proc sort data=_temp30 out=_temp930 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT30 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp930;
+	format _EVENT30;
+	tables _datasrt*_blcksrt*_cat * _EVENT30 * _trt / sparse norow nocol nopercent 
+		out=_pct30(drop=percent);
+run;
+
+proc sort data=_anal30 out=_denom30(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom30;
+	set _denom30;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf30;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom30 out=_denomin30(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame30;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=9;
+	length _EVENT30 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT30=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT30=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT30=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame30;
+	by _datasrt _blcksrt _cat _EVENT30 _trt;
+run;
+
+proc sort data=_pct30;
+	by _datasrt _blcksrt _cat _EVENT30 _trt;
+run;
+
+data _pct30;
+	merge _frame30(in=_inframe) _pct30;
+	by _datasrt _blcksrt _cat _EVENT30 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct30;
+	by _datasrt _blcksrt _EVENT30;
+run;
+
+data _miss30(keep=_datasrt _blcksrt _EVENT30 totcount);
+	set _pct30;
+	where _EVENT30=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT30;
+
+	if first._EVENT30 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT30;
+run;
+
+data _pct30(drop=totcount);
+	merge _pct30 _miss30;
+	by _datasrt _blcksrt _EVENT30;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf30;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin30;
+	by _datasrt _cat;
+run;
+
+data _denomin30;
+	merge _denomf30(in=_inframe) _denomin30;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=9;
+run;
+
+proc sort data=_pct30;
+	by _datasrt _cat;
+run;
+
+data _pct30;
+	if 0 then
+		set _basetemplate;
+	merge _denomin30(in=_a) _pct30;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT30 ";
+	_vrlabel=" ";
+	_rwlabel="Withdrawn from the study ";
+
+	if _EVENT30=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT30=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct30;
+	by _datasrt _blcksrt _catord _EVENT30 _trt _cat;
+run;
+
+data _base30;
+	length _catlabl $200;
+	set _pct30 end=eof;
+	by _datasrt _blcksrt _catord _EVENT30 _trt _cat;
+	retain _rowsrt 0 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT30 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=4;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 31 */
+data _anal31;
+	length _EVENT31 8;
+	set _data1;
+	where same and _EVENT31 is not missing;
+	_blcksrt=9;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal31;
+	by _datasrt _blcksrt _EVENT31 _trt _cat;
+run;
+
+data _temp31;
+	set _anal31;
+	output;
+run;
+
+proc sort data=_temp31 out=_temp931 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT31 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp931;
+	format _EVENT31;
+	tables _datasrt*_blcksrt*_cat * _EVENT31 * _trt / sparse norow nocol nopercent 
+		out=_pct31(drop=percent);
+run;
+
+proc sort data=_anal31 out=_denom31(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom31;
+	set _denom31;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf31;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom31 out=_denomin31(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame31;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=9;
+	length _EVENT31 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT31=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT31=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT31=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame31;
+	by _datasrt _blcksrt _cat _EVENT31 _trt;
+run;
+
+proc sort data=_pct31;
+	by _datasrt _blcksrt _cat _EVENT31 _trt;
+run;
+
+data _pct31;
+	merge _frame31(in=_inframe) _pct31;
+	by _datasrt _blcksrt _cat _EVENT31 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct31;
+	by _datasrt _blcksrt _EVENT31;
+run;
+
+data _miss31(keep=_datasrt _blcksrt _EVENT31 totcount);
+	set _pct31;
+	where _EVENT31=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT31;
+
+	if first._EVENT31 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT31;
+run;
+
+data _pct31(drop=totcount);
+	merge _pct31 _miss31;
+	by _datasrt _blcksrt _EVENT31;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf31;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin31;
+	by _datasrt _cat;
+run;
+
+data _denomin31;
+	merge _denomf31(in=_inframe) _denomin31;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=9;
+run;
+
+proc sort data=_pct31;
+	by _datasrt _cat;
+run;
+
+data _pct31;
+	if 0 then
+		set _basetemplate;
+	merge _denomin31(in=_a) _pct31;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT31 ";
+	_vrlabel=" ";
+	_rwlabel="Withdrawn after Dose 3 and before Dose 4 ";
+
+	if _EVENT31=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT31=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct31;
+	by _datasrt _blcksrt _catord _EVENT31 _trt _cat;
+run;
+
+data _base31;
+	length _catlabl $200;
+	set _pct31 end=eof;
+	by _datasrt _blcksrt _catord _EVENT31 _trt _cat;
+	retain _rowsrt 1 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT31 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=6;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 32 */
+data _anal32;
+	length _EVENT32 8;
+	set _data1;
+	where same and _EVENT32 is not missing;
+	_blcksrt=9;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal32;
+	by _datasrt _blcksrt _EVENT32 _trt _cat;
+run;
+
+data _temp32;
+	set _anal32;
+	output;
+run;
+
+proc sort data=_temp32 out=_temp932 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT32 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp932;
+	format _EVENT32;
+	tables _datasrt*_blcksrt*_cat * _EVENT32 * _trt / sparse norow nocol nopercent 
+		out=_pct32(drop=percent);
+run;
+
+proc sort data=_anal32 out=_denom32(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom32;
+	set _denom32;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf32;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom32 out=_denomin32(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame32;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=9;
+	length _EVENT32 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT32=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT32=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT32=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame32;
+	by _datasrt _blcksrt _cat _EVENT32 _trt;
+run;
+
+proc sort data=_pct32;
+	by _datasrt _blcksrt _cat _EVENT32 _trt;
+run;
+
+data _pct32;
+	merge _frame32(in=_inframe) _pct32;
+	by _datasrt _blcksrt _cat _EVENT32 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct32;
+	by _datasrt _blcksrt _EVENT32;
+run;
+
+data _miss32(keep=_datasrt _blcksrt _EVENT32 totcount);
+	set _pct32;
+	where _EVENT32=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT32;
+
+	if first._EVENT32 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT32;
+run;
+
+data _pct32(drop=totcount);
+	merge _pct32 _miss32;
+	by _datasrt _blcksrt _EVENT32;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf32;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin32;
+	by _datasrt _cat;
+run;
+
+data _denomin32;
+	merge _denomf32(in=_inframe) _denomin32;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=9;
+run;
+
+proc sort data=_pct32;
+	by _datasrt _cat;
+run;
+
+data _pct32;
+	if 0 then
+		set _basetemplate;
+	merge _denomin32(in=_a) _pct32;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT32 ";
+	_vrlabel=" ";
+	_rwlabel="Withdrawn after Dose 4 and before 1-month post(*ESC*){unicode 2013}Dose 4 visit ";
+
+	if _EVENT32=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT32=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct32;
+	by _datasrt _blcksrt _catord _EVENT32 _trt _cat;
+run;
+
+data _base32;
+	length _catlabl $200;
+	set _pct32 end=eof;
+	by _datasrt _blcksrt _catord _EVENT32 _trt _cat;
+	retain _rowsrt 2 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT32 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=6;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 33 */
+data _anal33;
+	length _EVENT33 8;
+	set _data1;
+	where same and _EVENT33 is not missing;
+	_blcksrt=9;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal33;
+	by _datasrt _blcksrt _EVENT33 _trt _cat;
+run;
+
+data _temp33;
+	set _anal33;
+	output;
+run;
+
+proc sort data=_temp33 out=_temp933 nodupkey;
+	by _datasrt _blcksrt _cat _EVENT33 _trt usubjid;
+	;
+run;
+
+proc freq data=_temp933;
+	format _EVENT33;
+	tables _datasrt*_blcksrt*_cat * _EVENT33 * _trt / sparse norow nocol nopercent 
+		out=_pct33(drop=percent);
+run;
+
+proc sort data=_anal33 out=_denom33(keep=_datasrt _cat) nodupkey;
+	;
+	by _datasrt _cat;
+run;
+
+data _denom33;
+	set _denom33;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf33;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom33 out=_denomin33(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+data _frame33;
+	_datasrt=1;
+	set _bydat1(keep=);
+	_blcksrt=9;
+	length _EVENT33 8;
+	_catLabl=" ";
+	_trt=1;
+	_EVENT33=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_EVENT33=1;
+	_catord=1;
+	_cat=1;
+	output;
+	_trt=3;
+	_EVENT33=1;
+	_catord=1;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame33;
+	by _datasrt _blcksrt _cat _EVENT33 _trt;
+run;
+
+proc sort data=_pct33;
+	by _datasrt _blcksrt _cat _EVENT33 _trt;
+run;
+
+data _pct33;
+	merge _frame33(in=_inframe) _pct33;
+	by _datasrt _blcksrt _cat _EVENT33 _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct33;
+	by _datasrt _blcksrt _EVENT33;
+run;
+
+data _miss33(keep=_datasrt _blcksrt _EVENT33 totcount);
+	set _pct33;
+	where _EVENT33=9998;
+	retain totcount;
+	by _datasrt _blcksrt _EVENT33;
+
+	if first._EVENT33 then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last._EVENT33;
+run;
+
+data _pct33(drop=totcount);
+	merge _pct33 _miss33;
+	by _datasrt _blcksrt _EVENT33;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf33;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin33;
+	by _datasrt _cat;
+run;
+
+data _denomin33;
+	merge _denomf33(in=_inframe) _denomin33;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=9;
+run;
+
+proc sort data=_pct33;
+	by _datasrt _cat;
+run;
+
+data _pct33;
+	if 0 then
+		set _basetemplate;
+	merge _denomin33(in=_a) _pct33;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="_EVENT33 ";
+	_vrlabel=" ";
+	_rwlabel="Withdrawn after 1-month post(*ESC*){unicode 2013}Dose 4 visit ";
+
+	if _EVENT33=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if _EVENT33=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct33;
+	by _datasrt _blcksrt _catord _EVENT33 _trt _cat;
+run;
+
+data _base33;
+	length _catlabl $200;
+	set _pct33 end=eof;
+	by _datasrt _blcksrt _catord _EVENT33 _trt _cat;
+	retain _rowsrt 3 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first._EVENT33 then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=6;
+	_dptindt=0;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Crit 34 */
+data _anal34;
+	length DSDECODN 8;
+	set _data1;
+	where same and DSDECODN is not missing;
+	_blcksrt=9;
+	_cnt=1;
+	_cat=1;
+
+	if _trt <=0 then
+		delete;
+	output;
+run;
+
+proc sort data=_anal34;
+	by _datasrt _blcksrt DSDECODN _trt _cat;
+run;
+
+data _temp34;
+	set _anal34;
+	output;
+run;
+
+proc sort data=_temp34 out=_temp934 nodupkey;
+	by _datasrt _blcksrt _cat DSDECODN _trt usubjid;
+	where RANDFL eq 'Y' and DSPHASEN=31 and EOSDCDT ne . and dsdecodn not in (. 2) 
+		and (VAX201DT ne . or VAX202DT ne .) and ((unblnddt ne . and 
+		eosdcdt>=unblnddt) or eosdcdt=eotxdcdt) and index(armcd, 'PLACEBO');
+run;
+
+proc freq data=_temp934;
+	format DSDECODN;
+	tables _datasrt*_blcksrt*_cat * DSDECODN * _trt / sparse norow nocol nopercent 
+		out=_pct34(drop=percent);
+run;
+
+proc sort data=_anal34 out=_denom34(keep=_datasrt _cat) nodupkey;
+	where RANDFL eq 'Y' and DSPHASEN=31 and EOSDCDT ne . and dsdecodn not in (. 2) 
+		and (VAX201DT ne . or VAX202DT ne .) and ((unblnddt ne . and 
+		eosdcdt>=unblnddt) or eosdcdt=eotxdcdt) and index(armcd, 'PLACEBO');
+	by _datasrt _cat;
+run;
+
+data _denom34;
+	set _denom34;
+	by _datasrt _cat;
+	label count='count';
+	_trt=1;
+	count=&_trt1.;
+	output;
+	_trt=2;
+	count=&_trt2.;
+	output;
+	_trt=3;
+	count=&_trt3.;
+	output;
+run;
+
+data _denomf34;
+	_datasrt=1;
+	set _bydat1(keep=);
+	* All treatment groups ;
+	_trt1=0;
+	_trt2=0;
+	_trt3=0;
+	* _CAT is the subgroup variable ;
+	_cat=1;
+	output;
+run;
+
+proc transpose data=_denom34 out=_denomin34(drop=_name_ _label_) prefix=_trt;
+	by _datasrt _cat;
+	var count;
+	id _trt;
+run;
+
+proc sort data=_pct34 out=_expv34 (keep=_datasrt _blcksrt DSDECODN) nodupkey;
+	by _datasrt _blcksrt DSDECODN;
+run;
+
+proc sort data=_expv34;
+	by _datasrt _blcksrt DSDECODN;
+run;
+
+data _frame34;
+	set _expv34;
+	by _datasrt _blcksrt DSDECODN;
+
+	if first._blcksrt then
+		_catord=0;
+	_catord + 1;
+	_trt=1;
+	_cat=1;
+	output;
+	_trt=2;
+	_cat=1;
+	output;
+	_trt=3;
+	_cat=1;
+	output;
+run;
+
+proc sort data=_frame34;
+	by _datasrt _blcksrt _cat DSDECODN _trt;
+run;
+
+proc sort data=_pct34;
+	by _datasrt _blcksrt _cat DSDECODN _trt;
+run;
+
+data _pct34;
+	merge _frame34(in=_inframe) _pct34;
+	by _datasrt _blcksrt _cat DSDECODN _trt;
+
+	if _inframe;
+
+	if count=. then
+		count=0;
+run;
+
+proc sort data=_pct34;
+	by _datasrt _blcksrt DSDECODN;
+run;
+
+data _miss34(keep=_datasrt _blcksrt DSDECODN totcount);
+	set _pct34;
+	where DSDECODN=9998;
+	retain totcount;
+	by _datasrt _blcksrt DSDECODN;
+
+	if first.DSDECODN then
+		totcount=0;
+	totcount=totcount+count;
+
+	if last.DSDECODN;
+run;
+
+data _pct34(drop=totcount);
+	merge _pct34 _miss34;
+	by _datasrt _blcksrt DSDECODN;
+
+	if totcount=0 then
+		delete;
+run;
+
+proc sort data=_denomf34;
+	by _datasrt _cat;
+run;
+
+proc sort data=_denomin34;
+	by _datasrt _cat;
+run;
+
+data _denomin34;
+	merge _denomf34(in=_inframe) _denomin34;
+	by _datasrt _cat;
+
+	if _inframe;
+	_blcksrt=9;
+run;
+
+proc sort data=_pct34;
+	by _datasrt _cat;
+run;
+
+data _pct34;
+	if 0 then
+		set _basetemplate;
+	merge _denomin34(in=_a) _pct34;
+	by _datasrt _cat;
+
+	if _a;
+	_varname="DSDECODN ";
+	_vrlabel="Reason for withdrawal from the study ";
+	_rwlabel=put(DSDECODN, dsdecod.);
+
+	if DSDECODN=9998 then
+		do;
+			_rwlabel="Missing ";
+			_catord=9998;
+		end;
+	else if DSDECODN=9999 then
+		do;
+			_rwlabel="Total ";
+			_catord=9999;
+		end;
+
+	if _catord=. then
+		_catord=9997;
+run;
+
+proc sort data=_pct34;
+	by _datasrt _blcksrt _catord DSDECODN _trt _cat;
+run;
+
+data _base34;
+	length _catlabl $200;
+	set _pct34 end=eof;
+	by _datasrt _blcksrt _catord DSDECODN _trt _cat;
+	retain _rowsrt 4 _rowmax 0;
+	array _trtcnt(*) _trt1-_trt4;
+	drop _rowmax _cpct;
+	length _cpct $100;
+	_cpct=' ';
+	_module='mcatstat';
+
+	if count > . then
+		_cvalue=put(count, 5.);
+	else
+		_cvalue=put(0, 5.);
+
+	if _trt ne . then
+		do;
+
+			if _trtcnt(_trt) > 0 then
+				do;
+					percent=count / _trtcnt(_trt) * 100;
+
+					if percent > 0 then
+						do;
+
+							if round(percent, 0.1) GE 0.1 then
+								_cpct="(*ESC*){nbspace 1}("||strip(put(percent, 5.1))||")";
+							else
+								_cpct="(*ESC*){nbspace 1}(0.0)";
+							_cvalue=trim(_cvalue)||_cpct;
+						end;
+				end;
+		end;
+
+	if length(_cvalue) < 13 then
+		do;
+			*----------------------------------------------------------------------;
+			* Put character A0x at right most character to pad text;
+			*----------------------------------------------------------------------;
+			substr(_cvalue, 13, 1)='A0'x;
+		end;
+
+	if first.DSDECODN then
+		do;
+			_rowsrt=_rowsrt + 1;
+			_rowmax=max(_rowsrt, _rowmax);
+		end;
+	_datatyp='data';
+	_indent=0;
+	_dptindt=0;
+	_vorder=1;
+	_rowjump=1;
+
+	if upcase(_rwlabel)='_NONE_' then
+		_rwlabel=' ';
+	_indent=8;
+	_dptindt=4;
+
+	if _trt=3 +1 then
+		_trt=9999;
+
+	if eof then
+		call symput('_rowsrt', compress(put(_rowmax, 4.)));
+	_direct="TOP ";
+	_p=2;
+run;
+
+/* Set together */
+data _final;
+	set _base1 _base2 _base3 _base4 _base5 _base6 _base7 _base8 _base9 _base10 
+		_base11 _base12 _base13 _base14 _base15 _base16 _base17 _base18 _base19 
+		_base20 _base21 _base22 _base23 _base24 _base25 _base26 _base27 _base28 
+		_base29 _base30 _base31 _base32 _base33 _base34;
+run;
+
+proc sort data=_final;
+	by _datasrt _blcksrt _rowsrt;
+run;
+
+data _final;
+	set _final;
+	drop __trt;
+
+	if _trt=9999 then
+		__trt=3 + 1;
+	else
+		__trt=_trt;
+
+	if __trt=. then
+		__trt=1;
+	_column=_trt;
+
+	if _column=9999 then
+		_column=3 + 1;
+run;
+
+proc sort data=_final out=_final;
+	by _datasrt _blcksrt _rowsrt _column;
+run;
+
+data _linecnt;
+	set _final end=eof;
+	by _datasrt _blcksrt _rowsrt _column;
+	retain _totline _maxval _maxrow _rwlbtag _vrlbtag 0 _maxline _linecnt;
+	keep _datasrt _blcksrt _totline _linecnt _maxrow;
+
+	if _rowjump=. then
+		_rowjump=1;
+
+	if first._blcksrt then
+		do;
+			_token=repeat(' ', 99);
+			_count=1;
+			_token=scan(_vrlabel, _count, "|");
+
+			if _token=: '_' then
+				_tag=1;
+			else
+				_tag=0;
+
+			do while(_token ^=' ');
+				_count=_count + 1;
+				_token=scan(_vrlabel, _count, "|");
+			end;
+			_linecnt=_count - 1 + _tag;
+			;
+			_totline=_linecnt;
+
+			if _vrlabel ne ' ' and _vrlabel ne '^' & _datatyp='data' then
+				_vrlbtag=1;
+		end;
+
+	if first._rowsrt then
+		do;
+			_token=repeat(' ', 99);
+			_count=1;
+			_token=scan(_rwlabel, _count, "|");
+
+			if _token=: '_' then
+				_tag=1;
+			else
+				_tag=0;
+
+			do while(_token ^=' ');
+				_maxrow=max(_maxrow, length(_token) + _indent);
+				_count=_count + 1;
+				_token=scan(_rwlabel, _count, "|");
+			end;
+			_maxline=_count - 1 + _tag;
+			;
+
+			if _rwlabel ne ' ' then
+				_rwlbtag=1;
+			_totline + _rowjump - 1;
+		end;
+	_token=repeat(' ', 99);
+	_count=1;
+	_token=scan(_cvalue, _count, "|");
+
+	if _token=: '_' then
+		_tag=1;
+	else
+		_tag=0;
+
+	do while(_token ^=' ');
+		_maxval=max(_maxval, length(_token));
+		_count=_count + 1;
+		_token=scan(_cvalue, _count, "|");
+	end;
+	_ccnt=_count - 1 + _tag;
+	_maxline=max(_maxline, _ccnt);
+
+	if last._rowsrt then
+		_totline=_maxline + _totline;
+
+	if last._blcksrt then
+		do;
+			_totline=_totline - _rowjump + 1;
+			output;
+		end;
+
+	if eof then
+		do;
+			call symput('_valwid', compress(put(_maxval, 3.)));
+			call symput('_rwlbtag', put(_rwlbtag, 1.));
+			call symput('_vrlbtag', put(_vrlbtag, 1.));
+		end;
+run;
+
+data _final;
+	length _direct $20;
+	_direct=' ';
+	merge _final _linecnt;
+	by _datasrt _blcksrt;
+run;
+
+data _sph (keep=name _s_col _e_col _splabl);
+	length _splabl $ 200 _s_col $ 40 _e_col $ 40 name $ 40;
+	_s_col=' ';
+	_e_col=' ';
+	_splabl=' ';
+	name=' ';
+	_s_col="TRT1";
+	_e_col="TRT2";
+	name=_s_col;
+	_splabl="Vaccine Group (as Randomized)~{line}";
+	output _sph;
+	name=_e_col;
+	output _sph;
+	_s_col="TRT4";
+	_e_col="TRT5";
+	name=_s_col;
+	_splabl="Vaccine Group (as Randomized)~{line}";
+	output _sph;
+	name=_e_col;
+	output _sph;
+run;
+
+data _sph;
+	set _sph;
+	_s_col_num=input(translate(_s_col, " ", "TRT"), best.);
+	_e_col_num=input(translate(_e_col, " ", "TRT"), best.);
+run;
+
+proc sort data=_sph (where=(_s_col=name)) out=_span_start;
+	by _s_col_num descending _e_col_num;
+run;
+
+data _span_start;
+	retain _span_hdr_order 1;
+	set _span_start;
+	by _s_col_num descending _e_col_num;
+
+	if (first._s_col_num) then
+		_span_hdr_order=1;
+	else
+		_span_hdr_order=_span_hdr_order + 1;
+run;
+
+proc sort data=_sph (where=(_e_col=name)) out=_span_end;
+	by _e_col_num descending _s_col_num;
+run;
+
+data _span_end;
+	retain _span_hdr_order 1;
+	set _span_end;
+	by _e_col_num descending _s_col_num;
+
+	if (first._e_col_num) then
+		_span_hdr_order=1;
+	else
+		_span_hdr_order=_span_hdr_order + 1;
+run;
+
+data _sph;
+	set _span_start _span_end;
+run;
+
+proc sort data=_sph out=_sph nodupkey;
+	by _s_col_num descending _e_col_num _s_col _e_col _splabl name;
+run;
+
+proc sql noprint;
+	create table rspon as select distinct _trt, _column , _vrlabel as _rwlabel , 
+		_datasrt, _blcksrt, (min(_rowsrt)-0.5) as _rowsrt , _dptindt as _indent , 0 
+		as _dptindt from _final(where=(_vrlabel^=' ')) group by _trt, _column , 
+		_datasrt, _blcksrt, _vrlabel;
+quit;
+
+data outdata1;
+	length _rvalue $800;
+	set _final rspon end=eof;
+	_rwindt=sum(_indent, _dptindt);
+
+	if _rwindt <=0 then
+		_rvalue=_rwlabel;
+	else
+		_rvalue=repeat(byte(160), _rwindt-1)||_rwlabel;
+	_dummy=1;
+
+	if _trt=. then
+		_trt=1;
+run;
+
+proc sort data=outdata1;
+	by _datasrt _trt _blcksrt _rowsrt;
+run;
+
+data treat;
+	length FMTNAME $8 start 8 label $200;
+	fmtname='TREAT';
+
+	do start=1 to 3 + ("N"="Y");
+		label=symget('_TRTLB'|| compress(put(start, 4.)));
+		label=trim(label) 
+			|| "|   (N~{super a}=" || compress(symget("_TRT" || compress(put(start, 
+			4.)))) || ")"   || "|n~{super b}     (%)";
+		output;
+	end;
+run;
+
+data outdata1;
+	set outdata1(rename=(_cvalue=_cvalue11));
+	_fixvar=1;
+	_fix2var=1;
+
+	if index(_cvalue11, "(") then
+		do;
+
+			if substr(_cvalue11, length(_cvalue11), 1) ne ")" then
+				_cvalue=_cvalue11||")";
+			else
+				_cvalue=_cvalue11;
+		end;
+	else if not missing(_cvalue11) then
+		_cvalue=_cvalue11;
+run;
+
+proc sort data=outdata1;
+	by _datasrt _trt _blcksrt _rowsrt;
+run;
+
+proc sort data=outdata1 out=_pre_transposed;
+	by _fixvar _fix2var _datasrt _blcksrt _rowsrt _rvalue _trt;
+run;
+
+data _pre_transposed;
+	set _pre_transposed;
+
+	if _trt=9999 then
+		_trt=3 +1;
+run;
+
+proc sql noprint;
+	select min(_blcksrt) into: openord1 from _pre_transposed where 
+		index(upcase(_rwlabel), 'RANDOMIZED TO BNT162B2');
+	select min(_blcksrt) into: openord2 from _pre_transposed where 
+		index(upcase(_rwlabel), 'RANDOMIZED TO PLACEBO');
+	select max(_blcksrt) into: openord3 from _pre_transposed;
+	select max(_column) into: totnx from _pre_transposed;
+	select max(_trt) into: maxtrtx from _pre_transposed;
+quit;
+
+data _pre_transposed;
+	set _pre_transposed;
+
+	if &openord1.<=_blcksrt<&openord2. and (_trt=&maxtrtx. or (_trt=2 and 
+		count=0)) then
+			_cvalue='';
+
+	if &openord2.<=_blcksrt<=&openord3. and (_trt=&maxtrtx. or (_trt=1 and 
+		count=0)) then
+			_cvalue='';
+run;
+
+proc transpose data=_pre_transposed out=_column_transposed (drop=_name_) 
+		prefix=TRT;
+	by _fixvar _fix2var _datasrt _blcksrt _rowsrt _rvalue;
+	var _cvalue;
+	id _trt;
+run;
+
+data maxtrtv;
+	set _pre_transposed;
+
+	if _trt=3;
+run;
+
+proc transpose data=maxtrtv out=_cntsort (drop=_name_) prefix=cntsort;
+	by _fixvar _fix2var _datasrt _blcksrt _rowsrt _rvalue;
+	var count;
+run;
+
+data _column_transposed;
+	merge _column_transposed(in=a) _cntsort;
+	by _fixvar _fix2var _datasrt _blcksrt _rowsrt _rvalue;
+
+	if a;
+	cntsort=input(cntsort1, best.);
+	drop cntsort1;
+run;
+
+proc sort;
+	by _fixvar _fix2var _datasrt _blcksrt descending cntsort _rowsrt _rvalue;
+run;
+
+data _column_transposed;
+	set _column_transposed;
+	by _fixvar _fix2var _datasrt _blcksrt descending cntsort _rowsrt _rvalue;
+
+	if _blcksrt=2 then
+		do;
+
+			if _rowsrt>1.5 then
+				do;
+
+					if first._blcksrt then
+						srt=1;
+					else
+						srt+1;
+					_rowsrt=1.5+srt;
+
+					if index(upcase(_rvalue), 'OTHER')>0 then
+						_rowsrt=999;
+
+					if cntsort=0 then
+						delete;
+				end;
+		end;
+
+	if _blcksrt=4 then
+		do;
+
+			if _rowsrt>4.5 then
+				do;
+
+					if first._blcksrt then
+						srt=1;
+					else
+						srt+1;
+					_rowsrt=4.5+srt;
+
+					if index(upcase(_rvalue), 'OTHER')>0 then
+						_rowsrt=999;
+
+					if cntsort=0 then
+						delete;
+				end;
+		end;
+
+	if _blcksrt=5 then
+		do;
+
+			if _rowsrt>7.5 then
+				do;
+
+					if first._blcksrt then
+						srt=1;
+					else
+						srt+1;
+					_rowsrt=7.5+srt;
+
+					if index(upcase(_rvalue), 'OTHER')>0 then
+						_rowsrt=999;
+
+					if cntsort=0 then
+						delete;
+				end;
+		end;
+
+	if _blcksrt=7 then
+		do;
+
+			if _rowsrt>1.5 then
+				do;
+
+					if first._blcksrt then
+						srt=1;
+					else
+						srt+1;
+					_rowsrt=1.5+srt;
+
+					if index(upcase(_rvalue), 'OTHER')>0 then
+						_rowsrt=999;
+
+					if cntsort=0 then
+						delete;
+				end;
+		end;
+
+	if _blcksrt=9 then
+		do;
+
+			if _rowsrt>4.5 then
+				do;
+
+					if first._blcksrt then
+						srt=1;
+					else
+						srt+1;
+					_rowsrt=4.5+srt;
+
+					if index(upcase(_rvalue), 'OTHER')>0 then
+						_rowsrt=999;
+
+					if cntsort=0 then
+						delete;
+				end;
+		end;
+	drop srt cntsort;
+run;
+
+proc sort;
+	by _fixvar _fix2var _datasrt _blcksrt _rowsrt _rvalue;
+run;
+
+proc contents data=_column_transposed 
+		out=_col_labels (where=(upcase(name)=: "TRT") keep=name) noprint;
+run;
+
+data _col_labels;
+	length name $ 40;
+	set _col_labels end=eof;
+	_sort_order=_n_;
+	name=upcase(name);
+
+	if eof then
+		call symput("_max_trt", left(put(_sort_order, best.)));
+run;
+
+proc sort data=_col_labels out=_col_labels;
+	by name;
+run;
+
+proc sort data=_sph out=_sph;
+	by name;
+run;
+
+data _final_sph;
+	merge _col_labels (in=a) _sph;
+	by name;
+
+	if a;
+run;
+
+proc sort data=_final_sph out=_final_sph nodup;
+	by _sort_order _span_hdr_order;
+run;
+
+data REPORT;
+	set _column_transposed;
+	_dummy=1;
+run;
+
+proc sort data=report;
+	by _datasrt _blcksrt _rowsrt _dummy;
+run;
+
+/* Output report */
+ods escapechar="~";
+ods html file="&outtable.";
+title1 "Disposition of All Randomized Subjects (*ESC*){unicode 2013} Phase 2/3 Subjects (*ESC*){unicode 2265}16 Years of Age";
+footnote1 "Note: Human immunodeficiency virus (HIV)-positive subjects are included in this summary but analyzed and reported separately.";
+footnote2 "Note: Subjects randomized but did not sign informed consent or had a significant quality event due to lack of PI oversight are not included in any analysis population.";
+footnote3 "Note: Because of a dosing error, Subjects C4591001 1081 10811053, C4591001 1088 10881077, C4591001 1177 11771089 and C4591001 1231 12311057 received an additional dose of BNT162b2 (30 (*ESC*){Unicode 00B5}g) at an unscheduled visit after receiving 1 dose of BNT162b2 (30 (*ESC*){Unicode 00B5}g) and 1 dose of placebo.";
+footnote4 "a.(*ESC*){nbspace 5}N = number of randomized subjects in the specified group, or the total sample. This value is the denominator for the percentage calculations.";
+footnote5 
+	"b.(*ESC*){nbspace 5}n = Number of subjects with the specified characteristic.";
+footnote6 "c.(*ESC*){nbspace 5}Original blinded placebo-controlled vaccination period is defined as the time period from Dose 1 to 1 month post-Dose 2.";
+footnote7 "d.(*ESC*){nbspace 5}Open-label vaccination period is defined as the time period from Dose 3 (first dose of BNT162b2 [30 (*ESC*){Unicode 00B5}g]) to 1 month post-Dose 4 (second dose of BNT162b2 [30 (*ESC*){Unicode 00B5}g]).";
+
+proc report data=report nowd list missing contents="" split="|" 
+		style(report)={} style(header)={} style(column)={};
+	column _fixvar _fix2var _datasrt _blcksrt _rowsrt ("" _rvalue) 
+		(("Vaccine Group (as Randomized)~{line}" TRT1 TRT2) TRT3 _dummy);
+	define _fixvar / group noprint;
+	define _fix2var / group noprint;
+	define _datasrt / group order=internal noprint;
+	define _blcksrt / group order=internal noprint;
+	define _rowsrt / group order=internal noprint;
+	define _rvalue / group id " " order=data style(column)={just=left width=25mm 
+		rightmargin=18px} style(header)={just=left asis=on} left;
+	define _dummy / sum noprint;
+	define TRT1 / group nozero "BNT162b2 (30 (*ESC*){unicode 03BC}g)|   (N~{super a}=&_trt1.)|n~{super b}     (%)" 
+		spacing=2 style(header)={just=center} center;
+	define TRT2 / group nozero 
+		"Placebo|   (N~{super a}=&_trt2.)|n~{super b}     (%)" spacing=2 
+		style(header)={just=center} center;
+	define TRT3 / group nozero 
+		"Total|   (N~{super a}=&_trt3.)|n~{super b}     (%)" spacing=2 
+		style(header)={just=center} center;
+	break before _fixvar / contents="" page;
+	compute before _fix2var;
+		line @1 " ~n ";
+	endcomp;
+	compute after _blcksrt;
+		line " ~n ";
+	endcomp;
+run;
+
+ods markup close;
+ods HTML close;
+
+proc printto;
+run;

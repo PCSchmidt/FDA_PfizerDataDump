@@ -1,0 +1,320 @@
+***********************************************************************************************;
+**  Program Name    : adds.sas                                                               **;
+**  Date Created    : 07Mar2021                                                              **;
+**  Programmer Name : LIUB65                                                                 **;
+**  Purpose         : Create adds dataset                                                    **;
+**  Input data      : ds suppds sv adsl                                                      **;
+**  Output data     : adds.sas7bdat                                                          **;
+***********************************************************************************************;
+%let oprot=/Volumes/app/cdars/prod/sites/cdars4/prjC459/nda2_unblinded_esub/bla_euaext_esub_sdtm/saseng/cdisc3_0;
+%let prot=/Volumes/app/cdars/prod/sites/cdars4/prjC459/nda2_unblinded_esub/bla_esub_adam/saseng/cdisc3_0;
+libname dataprot "&oprot./data" access=readonly;
+libname datvprot "&prot./data_vai";
+
+
+proc printto print="&prot./analysis/esub/output/adds.rpt" 
+        log="&prot./analysis/esub/logs/adds.log" new;
+run;
+
+******************************************************************************************;
+* Clean *;
+******************************************************************************************;
+
+proc delete data=work._all_;
+run;
+
+******************************************************************************************;
+* Format *;
+******************************************************************************************;
+
+proc format;
+    invalue epoch "SCREENING"=1 "OPEN LABEL TREATMENT"=7 "VACCINATION"=26 
+        "FOLLOW-UP"=31 "REPEAT SCREENING 1"=101 "REPEAT SCREENING 2"=102;
+    invalue dsdecod "COMPLETED"=2 "SCREEN FAILURE"=13 "ADVERSE EVENT"=1 "DEATH"=3 
+        "LOST TO FOLLOW-UP"=5 "OTHER"=7 "PHYSICIAN DECISION"=8 "PREGNANCY"=9 
+        "PROTOCOL DEVIATION"=11 "STUDY TERMINATED BY SPONSOR"=14 
+        "WITHDRAWAL BY SUBJECT"=16 
+        "MEDICATION ERROR WITHOUT ASSOCIATED ADVERSE EVENT"=17 
+        "NO LONGER MEETS ELIGIBILITY CRITERIA"=18 
+        "REFUSED FURTHER STUDY PROCEDURES"=25 "WITHDRAWAL BY PARENT/GUARDIAN"=26;
+run;
+
+******************************************************************************************;
+* Process *;
+******************************************************************************************;
+
+/* Readin SDTM and merge DS with SUPPDS */
+data ds;
+    set dataprot.ds;
+
+    if upcase(dscat)='DISPOSITION EVENT';
+run;
+
+data suppds;
+    set dataprot.suppds;
+    where idvar="DSSEQ";
+run;
+
+proc sort data=suppds;
+    by studyid usubjid idvar idvarval;
+run;
+
+proc transpose data=suppds out=suppds_h;
+    by studyid usubjid idvar idvarval;
+    id qnam;
+    idlabel qlabel;
+    var qval;
+run;
+
+data suppds_h (drop=idvar idvarval _NAME_ _LABEL_);
+    set suppds_h;
+    DSSEQ=input(idvarval, best12.);
+run;
+
+proc sort data=ds out=_ds1;
+    by STUDYID USUBJID DSSEQ;
+run;
+
+proc sort data=suppds_h out=_ds2;
+    by STUDYID USUBJID DSSEQ;
+run;
+
+data _spmdel_sdtm_temp_out1;
+    merge _ds1(in=d1) _ds2(in=d2);
+    by STUDYID USUBJID DSSEQ;
+
+    if d1;
+run;
+
+/* Derive ASTDT ASTTM */
+data _ds1;
+    set _spmdel_sdtm_temp_out1;
+    ASTDT=input(DSSTDTC, ??is8601da.);
+    format ASTDT date9.;
+run;
+
+/* Merge DS with ADSL */
+proc sort data=_ds1;
+    by USUBJID;
+run;
+
+proc sort data=datvprot.adsl out=_ds2;
+    by USUBJID;
+run;
+
+data _ds3;
+    merge _ds1(in=d1) _ds2(in=d2 keep=Usubjid SUBJID SITEID AGE AGEU SEX SEXN RACE 
+        RACEN ARACE ARACEN RANDFL SAFFL ARM ARMCD ACTARM ACTARMCD TRTSDT TRTSTM 
+        TRTSDTM TRTEDT TRTETM TRTEDTM TRTSEQP TRTSEQA AGEGR1 AGEGR1N COHORT COHORTN 
+        DOSALVL DOSALVLN DOSPLVL DOSPLVLN VAX101DT VAX102DT VAX10UDT VAX201DT 
+        VAX202DT VAX20UDT UNBLNDDT VAX101 VAX102 VAX10U VAX201 VAX202 VAX20U TRT01A 
+        TRT01AN TRT02A TRT02AN TRT01P TRT01PN TRT02P TRT02PN TR01SDT TR01STM TR01SDTM 
+        TR01EDT TR01ETM TR01EDTM TR02SDT TR02STM TR02SDTM TR02EDT TR02ETM TR02EDTM 
+        PHASE PHASEN EOSDCDT EOTDCDT BLDV6DT BLDV7DT AGEGR4 AGEGR4N PEDIMMFL MULENRFL 
+        PEDREAFL HIVFL DS3KFL EOTXDCDT EOTXDCRS BDCSRDT X1CSRDT STCSRDT AGETR01 
+        AGETRU01 RAND1FL SAF1FL SAF2FL TR01SDT TR01STM TR01SDTM TR01EDT TR01ETM 
+        TR01EDTM TR02SDT TR02STM TR02SDTM TR02EDT TR02ETM TR02EDTM);
+    by USUBJID;
+
+    if d1;
+run;
+
+data adds;
+    length dsdecodn 8 dsphasen 8;
+    set _ds3;
+
+    /* Imupte ADT */
+    if ^missing(DSDTC) then
+        do;
+            length yr $4 mm dd $2;
+            yr=substr(DSDTC, 1, 4);
+            mm=substr(DSDTC, 6, 2);
+            dd=substr(DSDTC, 9, 2);
+            ;
+
+            if yr ne ' ' then
+                do;
+                    dflag=' ';
+
+                    if (dd eq "  " or dd eq "-T") and mm ne " " then
+                        do;
+                            dd='01';
+                            ;
+                        end;
+
+                    if mm eq "  " or mm eq "--" then
+                        do;
+                            mm='01';
+                            dd='01';
+                            ;
+                        end;
+                    newdate=(trim(left(yr))||'-'||trim(left(mm))||'-'||trim(left(dd)));
+                    ADT=input(newdate, ??is8601da.);
+                    format ADT date9.;
+                end;
+            drop yr mm dd dflag newdate;
+        end;
+
+    /*  Create dsphasen and dsdecodn */
+    dsphasen=input(dsphase, epoch.);
+    dsdecodn=input(dsdecod, ?? dsdecod.);
+run;
+
+*****************************************************************************************;
+* Date Imputation Rules. *;
+*****************************************************************************************;
+
+/* Create M1PD2DT */
+data sv1;
+    set dataprot.sv;
+    where visit in ("V3_MONTH1_POSTVAX2_L" "V7_MONTH1_S");
+    M1PD2DT=input(svstdtc, yymmdd10.);
+    format M1PD2DT date9.;
+    keep usubjid M1PD2DT;
+run;
+
+/* Create M6PD2DT */
+data sv2;
+    set dataprot.sv;
+    where visit in ("V4_MONTH6_L" "V8_MONTH6_S");
+    M6PD2DT=input(svstdtc, yymmdd10.);
+    format M6PD2DT date9.;
+    keep usubjid M6PD2DT;
+run;
+
+/* Create M1PX2DT */
+data sv3;
+    set dataprot.sv;
+    where visit in ("V103_MONTH1");
+    M1PX2DT=input(svstdtc, yymmdd10.);
+    format M1PX2DT date9.;
+    keep usubjid M1PX2DT;
+run;
+
+/* Correct M1PD2DT */
+data sv4;
+    set dataprot.sv;
+    where visit in ("V7_MONTH1_S_R");
+    _M1PD2DT=input(svstdtc, yymmdd10.);
+    format _M1PD2DT date9.;
+    keep usubjid _M1PD2DT;
+run;
+
+proc sql undo_policy=none;
+    create table adds as select a.*, b.M1PD2DT, c.M6PD2DT, d.M1PX2DT, e._M1PD2DT 
+        from adds a left join sv1 b on a.usubjid=b.usubjid left join sv2 c on 
+        a.usubjid=c.usubjid left join sv3 d on a.usubjid=d.usubjid left join sv4 e on 
+        a.usubjid=e.usubjid;
+quit;
+
+data Adds;
+    set adds;
+
+    if cohortn=1.16 then
+        M1PD2DT=_M1PD2DT;
+
+    if missing(M1PD2DT) and BLDV6DT ne . then
+        M1PD2DT=BLDV6DT;
+
+    if missing(M6PD2DT) and BLDV7DT ne . then
+        M6PD2DT=BLDV7DT;
+    drop _M1PD2DT;
+    label M1PD2DT="1 Month Post Dose 2 Visit Date" 
+        M6PD2DT="6 Months Post Dose 2 Visit Date" 
+        M1PX2DT="1 Month Post Dose 4 Visit Date";
+run;
+
+data adds;
+    set adds;
+    attrib M1P2CUT label='1 Month PD2 Cutoff Date for Disposition' 
+        format=date9. M1P2EXC label='Excluded from 1 Month Post Dose 2';
+    M1P2CUT=coalesce(BLDV6DT, M1PD2DT);
+
+    if M1PD2DT>BLDV6DT>. then
+        M1P2CUT=M1PD2DT;
+
+    if missing(M1P2CUT) then
+        do;
+
+            if eosdcdt=eotdcdt>. then
+                M1P2CUT=eosdcdt;
+            else if vax10udt>vax102dt>. then
+                M1P2CUT=vax10udt+42;
+            else if vax102dt ne . then
+                M1P2CUT=vax102dt+42;
+            else if vax10udt>vax101dt>. and vax102dt=. then
+                M1P2CUT=vax10udt+42;
+            else if vax102dt=. and vax101dt ne . then
+                M1P2CUT=vax101dt+42+42;
+
+            if M1P2CUT>=vax201dt>. then
+                M1P2CUT=vax201dt-1;
+        end;
+
+    if dsphase="OPEN LABEL TREATMENT" then
+        M1P2EXC='Y';
+    else if dsphase in ("FOLLOW-UP") then
+        do;
+
+            if ASTDT>M1P2CUT>. then
+                M1P2EXC='Y';
+
+            if eosdcdt>eotdcdt and eosdcdt>M1P2CUT>. then
+                M1P2EXC='Y';
+        end;
+run;
+
+/* Calculate the study day */
+data adds;
+    set adds;
+
+    If ^Missing(AstDt) and ^Missing(TrtSdt) then
+        do;
+
+            If AstDt lt TrtSdt then
+                AstDy=AstDt - TrtSdt;
+            Else If AstDt ge TrtSdt then
+                AstDy=AstDt - TrtSdt + 1;
+        end;
+    ;
+    orig_dsdecod=dsdecod;
+run;
+
+data final;
+    retain STUDYID USUBJID SUBJID SITEID ADT ASTDT ASTDY DSPHASE DSPHASEN DSCAT 
+        DSDECOD DSDECODN DSTERM DSPHASE DSRANGRP M1PD2DT M6PD2DT M1PX2DT M1P2CUT 
+        M1P2EXC USUBJID SUBJID SITEID AGE AGEU SEX SEXN RACE RACEN ARACE ARACEN 
+        RANDFL SAFFL ARM ARMCD ACTARM ACTARMCD TRTSDT TRTSTM TRTSDTM TRTEDT TRTETM 
+        TRTEDTM TRTSEQP TRTSEQA AGEGR1 AGEGR1N COHORT COHORTN DOSALVL DOSALVLN 
+        DOSPLVL DOSPLVLN VAX101DT VAX102DT VAX10UDT VAX201DT VAX202DT VAX20UDT 
+        UNBLNDDT VAX101 VAX102 VAX10U VAX201 VAX202 VAX20U TRT01A TRT01AN TRT02A 
+        TRT02AN TRT01P TRT01PN TRT02P TRT02PN TR01SDT TR01STM TR01SDTM TR01EDT 
+        TR01ETM TR01EDTM TR02SDT TR02STM TR02SDTM TR02EDT TR02ETM TR02EDTM PHASE 
+        PHASEN EOSDCDT EOTDCDT BLDV6DT BLDV7DT AGEGR4 AGEGR4N PEDIMMFL MULENRFL 
+        PEDREAFL HIVFL DS3KFL EOTXDCDT EOTXDCRS BDCSRDT X1CSRDT STCSRDT AGETR01 
+        AGETRU01 RAND1FL SAF1FL SAF2FL DOMAIN DSSEQ;
+    set adds(keep=STUDYID USUBJID SUBJID SITEID ADT ASTDT ASTDY DSPHASE DSPHASEN 
+        DSCAT DSDECOD DSDECODN DSTERM DSPHASE DSRANGRP M1PD2DT M6PD2DT M1PX2DT 
+        M1P2CUT M1P2EXC USUBJID SUBJID SITEID AGE AGEU SEX SEXN RACE RACEN ARACE 
+        ARACEN RANDFL SAFFL ARM ARMCD ACTARM ACTARMCD TRTSDT TRTSTM TRTSDTM TRTEDT 
+        TRTETM TRTEDTM TRTSEQP TRTSEQA AGEGR1 AGEGR1N COHORT COHORTN DOSALVL DOSALVLN 
+        DOSPLVL DOSPLVLN VAX101DT VAX102DT VAX10UDT VAX201DT VAX202DT VAX20UDT 
+        UNBLNDDT VAX101 VAX102 VAX10U VAX201 VAX202 VAX20U TRT01A TRT01AN TRT02A 
+        TRT02AN TRT01P TRT01PN TRT02P TRT02PN TR01SDT TR01STM TR01SDTM TR01EDT 
+        TR01ETM TR01EDTM TR02SDT TR02STM TR02SDTM TR02EDT TR02ETM TR02EDTM PHASE 
+        PHASEN EOSDCDT EOTDCDT BLDV6DT BLDV7DT AGEGR4 AGEGR4N PEDIMMFL MULENRFL 
+        PEDREAFL HIVFL DS3KFL EOTXDCDT EOTXDCRS BDCSRDT X1CSRDT STCSRDT AGETR01 
+        AGETRU01 RAND1FL SAF1FL SAF2FL DOMAIN DSSEQ);
+    label ADT='Analysis Date' ASTDT='Analysis Start Date' 
+        ASTDY='Analysis Start Relative Day' 
+        DSDECODN='Standardized Disposition Term (N)' 
+        DSPHASEN='Disposition Phase Code (N)';
+run;
+
+proc sort data=final out=datvprot.adds(label='Disposition Analysis Dataset' 
+        DROP=DSRANGRP);
+    by USUBJID DSSEQ;
+    quit;
+
+proc printto;
+run;
